@@ -89,4 +89,4 @@ require (
 	google.golang.org/protobuf v1.25.0 // indirect
 )
 
-go 1.18
+go 1.19
