@@ -3,7 +3,7 @@ module github.com/TakatoHano/terraform-provider-mysql
 require (
 	github.com/aws/aws-sdk-go v1.44.89
 	github.com/go-sql-driver/mysql v1.6.0
-	github.com/gofrs/uuid v3.2.0+incompatible
+	github.com/gofrs/uuid v3.4.0+incompatible
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.6.0
 	github.com/hashicorp/terraform-plugin-sdk v1.17.2
