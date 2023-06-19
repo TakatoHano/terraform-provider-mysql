@@ -1,4 +1,4 @@
-FROM golang:1.18.3-buster
+FROM golang:1.20.5-buster
 
 RUN apt-get update -qq && \
     apt-get install -y sudo build-essential bash && \
