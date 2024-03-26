@@ -10,6 +10,10 @@ cloud.google.com/go/internal/version
 # cloud.google.com/go/storage v1.10.0
 ## explicit; go 1.11
 cloud.google.com/go/storage
+# filippo.io/edwards25519 v1.1.0
+## explicit; go 1.20
+filippo.io/edwards25519
+filippo.io/edwards25519/field
 # github.com/Masterminds/goutils v1.1.0
 ## explicit
 github.com/Masterminds/goutils
@@ -98,8 +102,8 @@ github.com/davecgh/go-spew/spew
 # github.com/fatih/color v1.7.0
 ## explicit
 github.com/fatih/color
-# github.com/go-sql-driver/mysql v1.6.0
-## explicit; go 1.10
+# github.com/go-sql-driver/mysql v1.8.1
+## explicit; go 1.18
 github.com/go-sql-driver/mysql
 # github.com/gofrs/uuid v3.2.0+incompatible
 ## explicit
