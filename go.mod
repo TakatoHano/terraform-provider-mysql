@@ -6,7 +6,7 @@ require (
 	github.com/gofrs/uuid v3.2.0+incompatible
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.6.0
-	github.com/hashicorp/terraform-plugin-sdk v1.17.2
+	github.com/hashicorp/terraform-plugin-sdk/v2 v2.35.0
 	golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90
 	golang.org/x/net v0.0.0-20220826154423-83b083e8dc8b
 )
