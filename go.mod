@@ -1,7 +1,7 @@
 module github.com/TakatoHano/terraform-provider-mysql
 
 require (
-	github.com/aws/aws-sdk-go v1.44.89
+	github.com/aws/aws-sdk-go v1.55.6
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/gofrs/uuid v3.2.0+incompatible
 	github.com/hashicorp/go-multierror v1.1.1
