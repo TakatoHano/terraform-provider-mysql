@@ -163,7 +163,7 @@ github.com/hashicorp/go-safetemp
 # github.com/hashicorp/go-uuid v1.0.1
 ## explicit
 github.com/hashicorp/go-uuid
-# github.com/hashicorp/go-version v1.6.0
+# github.com/hashicorp/go-version v1.7.0
 ## explicit
 github.com/hashicorp/go-version
 # github.com/hashicorp/hcl v1.0.0
