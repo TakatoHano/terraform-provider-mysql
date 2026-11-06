@@ -112,7 +112,7 @@ func formatDatabaseName(database string) string {
 
 func formatTableName(table string) string {
 	if table == "" || table == "*" {
-		return fmt.Sprintf("*")
+		return "*"
 	}
 	return fmt.Sprintf("`%s`", table)
 }
@@ -122,7 +122,7 @@ func userOrRole(user string, host string, role string, hasRoles bool) (string, b
 		return fmt.Sprintf("'%s'@'%s'", user, host), false, nil
 	} else if len(role) > 0 {
 		if !hasRoles {
-			return "", false, fmt.Errorf("Roles are only supported on MySQL 8 and above")
+			return "", false, fmt.Errorf("roles are only supported on MySQL 8 and above")
 		}
 
 		return fmt.Sprintf("'%s'", role), true, nil
@@ -165,13 +165,13 @@ func CreateGrant(d *schema.ResourceData, meta interface{}) error {
 		hasPrivs = true
 	} else if attr, ok := d.GetOk("roles"); ok {
 		if !hasRoles {
-			return fmt.Errorf("Roles are only supported on MySQL 8 and above")
+			return fmt.Errorf("roles are only supported on MySQL 8 and above")
 		}
 		listOfRoles := attr.(*schema.Set).List()
 		rolesGranted = len(listOfRoles)
 		privilegesOrRoles = flattenList(listOfRoles, "'%s'")
 	} else {
-		return fmt.Errorf("One of privileges or roles is required")
+		return fmt.Errorf("one of privileges or roles is required")
 	}
 
 	user := d.Get("user").(string)
@@ -208,7 +208,7 @@ func CreateGrant(d *schema.ResourceData, meta interface{}) error {
 	log.Println("Executing statement:", stmtSQL)
 	_, err = db.Exec(stmtSQL)
 	if err != nil {
-		return fmt.Errorf("Error running SQL (%s): %s", stmtSQL, err)
+		return fmt.Errorf("error running SQL (%s): %s", stmtSQL, err)
 	}
 
 	id := fmt.Sprintf("%s@%s:%s", user, host, database)

@@ -99,10 +99,10 @@ func testAccDatabaseCheck_full(rn string, name string, charset string, collation
 			return fmt.Errorf("error reading database: %s", err)
 		}
 
-		if strings.Index(createSQL, fmt.Sprintf("CHARACTER SET %s", charset)) == -1 {
+		if !strings.Contains(createSQL, fmt.Sprintf("CHARACTER SET %s", charset)) {
 			return fmt.Errorf("database default charset isn't %s", charset)
 		}
-		if strings.Index(createSQL, fmt.Sprintf("COLLATE %s", collation)) == -1 {
+		if !strings.Contains(createSQL, fmt.Sprintf("COLLATE %s", collation)) {
 			return fmt.Errorf("database default collation isn't %s", collation)
 		}
 

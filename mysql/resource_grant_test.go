@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
@@ -47,7 +46,6 @@ func TestAccGrant(t *testing.T) {
 }
 
 func TestAccGrant_role(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	roleName := fmt.Sprintf("TFRole%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
@@ -82,7 +80,6 @@ func TestAccGrant_role(t *testing.T) {
 }
 
 func TestAccGrant_roleToUser(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	roleName := fmt.Sprintf("TFRole%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{

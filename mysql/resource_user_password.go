@@ -56,10 +56,12 @@ func SetUserPassword(d *schema.ResourceData, meta interface{}) error {
 
 	password := uuid.String()
 	pgpKey := d.Get("pgp_key").(string)
+	//lint:ignore SA1019 no replacement in SDK v1; removed only in SDK v2
 	encryptionKey, err := encryption.RetrieveGPGKey(pgpKey)
 	if err != nil {
 		return err
 	}
+	//lint:ignore SA1019 no replacement in SDK v1; removed only in SDK v2
 	fingerprint, encrypted, err := encryption.EncryptValue(encryptionKey, password, "MySQL Password")
 	if err != nil {
 		return err

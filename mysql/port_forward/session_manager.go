@@ -8,8 +8,11 @@ import (
 	"runtime"
 	"strconv"
 
+	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
 	"github.com/aws/aws-sdk-go/aws"
+	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
 	"github.com/aws/aws-sdk-go/aws/session"
+	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"

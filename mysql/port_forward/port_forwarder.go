@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -159,7 +158,7 @@ func defaultSSHKeyPath() string {
 }
 
 func (conf *portFowardConfig) CreateSSHClientConfig() (*ssh.ClientConfig, error) {
-	key, err := ioutil.ReadFile(conf.keyPath)
+	key, err := os.ReadFile(conf.keyPath)
 	if err != nil {
 		return nil, err
 	}

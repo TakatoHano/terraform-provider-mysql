@@ -106,7 +106,7 @@ func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
 				return nil
 			}
 		}
-		return fmt.Errorf("Error during show create database: %s", err)
+		return fmt.Errorf("error during show create database: %s", err)
 	}
 
 	defaultCharset := extractIdentAfter(createSQL, defaultCharacterSetKeyword)
@@ -140,10 +140,10 @@ func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
 
 		if res != nil {
 			if res == sql.ErrNoRows {
-				return fmt.Errorf("Charset %s has no default collation", defaultCharset)
+				return fmt.Errorf("charset %s has no default collation", defaultCharset)
 			}
 
-			return fmt.Errorf("Error getting default charset: %s, %s", res, defaultCharset)
+			return fmt.Errorf("error getting default charset: %s, %s", res, defaultCharset)
 		}
 	}
 
