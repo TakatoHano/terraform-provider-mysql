@@ -29,10 +29,9 @@ jobs:
         run: bash scripts/gofmtcheck.sh
       - name: Vet
         run: go vet ./...
-      # Non-blocking for now; becomes blocking (remove continue-on-error) once existing findings are cleaned up.
+      # Blocking: any staticcheck finding fails CI.
       - name: staticcheck
         uses: dominikh/staticcheck-action@v1
-        continue-on-error: true
         with:
           version: "latest"
           install-go: false

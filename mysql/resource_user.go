@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -162,7 +163,7 @@ func UpdateUser(d *schema.ResourceData, meta interface{}) error {
 		/* ALTER USER syntax introduced in MySQL 5.7.6 deprecates SET PASSWORD (GH-8230) */
 		serverVersion, err := serverVersion(db)
 		if err != nil {
-			return fmt.Errorf("Could not determine server version: %s", err)
+			return fmt.Errorf("could not determine server version: %s", err)
 		}
 
 		ver, _ := version.NewVersion("5.7.6")
@@ -192,9 +193,7 @@ func UpdateUser(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	if d.HasChange("tls_option") && currentVersion.GreaterThan(requiredVersion) {
-		var stmtSQL string
-
-		stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s'  REQUIRE %s",
+		stmtSQL := fmt.Sprintf("ALTER USER '%s'@'%s'  REQUIRE %s",
 			d.Get("user").(string),
 			d.Get("host").(string),
 			fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string)))
@@ -215,21 +214,14 @@ func ReadUser(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	stmtSQL := fmt.Sprintf("SELECT USER FROM mysql.user WHERE USER='%s'",
-		d.Get("user").(string))
-
-	log.Println("Executing statement:", stmtSQL)
-
-	rows, err := db.Query(stmtSQL)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	if !rows.Next() && rows.Err() == nil {
+	var exists int
+	err = db.QueryRow("SELECT 1 FROM mysql.user WHERE user = ? AND host = ?",
+		d.Get("user").(string), d.Get("host").(string)).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
 		d.SetId("")
+		return nil
 	}
-	return rows.Err()
+	return err
 }
 
 func DeleteUser(d *schema.ResourceData, meta interface{}) error {
