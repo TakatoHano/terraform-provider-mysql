@@ -80,9 +80,14 @@ export all_proxy="socks5://your.proxy:3306"
 
 ~> **Caution:** This is a feature in development.
 
-The provider can reach a database in a private subnet through an EC2 bastion
+The provider can reach a database in a private subnet through an EC2 instance
 that runs the SSM Agent. Set `endpoint` to `localhost:<unused port>` and
 configure `aws_ssm_session_manager_client_config`.
+
+The recommended `mode = "port_forwarding"` uses the SSM document
+`AWS-StartPortForwardingSessionToRemoteHost`. It needs no SSH keys, no sshd on
+the instance and no `ssh_user`/`ssh_key_path`. `rds_endpoint` may be given as
+`host` (port 3306 is assumed) or `host:port`.
 
 ```terraform
 # Create VPC and Subnets
@@ -126,10 +131,10 @@ provider "mysql" {
   password = aws_db_instance.default.password
 
   aws_ssm_session_manager_client_config {
+    # No SSH keys or sshd are needed in this mode.
+    mode            = "port_forwarding"
     ec2_instance_id = resource.aws_instance.bastion.id
     rds_endpoint    = resource.aws_db_instance.default.endpoint
-    ssh_user        = local.ssh_user
-    ssh_key_path    = local.ssh_key_path
     aws_profile     = local.aws_profile
     region          = local.region
   }
@@ -140,13 +145,41 @@ provider "mysql" {
 
 See [Setting up Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started.html) for the AWS side of the setup.
 
-~> **Note:** The SSH tunnel, the `session-manager-plugin` process and the SSM session are closed when the provider exits. An `aws_profile` that does not exist in the shared AWS config is an error.
+### Required AWS permissions and network
 
-`remote_host` may be given as `host` (port 22 is assumed) or `host:port`. Host
+- The instance needs the SSM Agent and the `AmazonSSMManagedInstanceCore` managed policy (or equivalent).
+- The caller needs `ssm:StartSession` on the instance ARN and on `arn:aws:ssm:*:*:document/AWS-StartPortForwardingSessionToRemoteHost`, plus `ssm:TerminateSession`.
+- The instance's security group must allow egress to the RDS port, and the RDS security group must allow ingress from the instance.
+
+~> **Note:** The `session-manager-plugin` process and the SSM session are closed when the provider exits. An `aws_profile` that does not exist in the shared AWS config is an error. The plugin listens on `localhost` only, so the port is not reachable from other hosts.
+
+### `ssh` mode (legacy)
+
+`mode` defaults to `ssh`, which tunnels SSH over an SSM session
+(`AWS-StartSSHSession`). It requires sshd and an SSH key on the instance. A
+future major version may change the default mode to `port_forwarding`, so set
+`mode` explicitly.
+
+```terraform
+provider "mysql" {
+  endpoint = "localhost:${unused_port}"
+  username = aws_db_instance.default.username
+  password = aws_db_instance.default.password
+
+  aws_ssm_session_manager_client_config {
+    mode            = "ssh" # the default
+    ec2_instance_id = resource.aws_instance.bastion.id
+    rds_endpoint    = resource.aws_db_instance.default.endpoint
+    ssh_user        = local.ssh_user
+    ssh_key_path    = local.ssh_key_path
+  }
+}
+```
+
+In `ssh` mode `remote_host` may be given as `host` (port 22 is assumed) or `host:port`. Host
 keys are verified against `~/.ssh/known_hosts`; the file (and `~/.ssh`) is
-created when missing and unknown hosts are added on first use.
-
-~> **Note:** The local port forward listener binds to `127.0.0.1` only, so it is not reachable from other hosts.
+created when missing and unknown hosts are added on first use. The local port
+forward listener binds to `127.0.0.1` only.
 
 ## Port forward through public bastion
 
@@ -238,9 +271,10 @@ Required:
 Optional:
 
 - `aws_profile` (String) AWS user's profile (SSO logged in), can also be sourced from the `AWS_PROFILE` or `AWS_DEFAULT_PROFILE` environment variables. If you use AWS credentials, they can also be sourced from the `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY_ID`, and `AWS_SESSION_TOKEN` environment variables.
+- `mode` (String) How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.
 - `region` (String) AWS region, can also be sourced from the `AWS_REGION` or `AWS_DEFAULT_REGION` environment variables.
-- `ssh_key_path` (String) SSH user's private key path. Defaults to `~/.ssh/id_rsa`.
-- `ssh_user` (String) SSH user name. Defaults to current user name.
+- `ssh_key_path` (String) SSH user's private key path (`ssh` mode only). Defaults to `~/.ssh/id_rsa`.
+- `ssh_user` (String) SSH user name (`ssh` mode only). Defaults to current user name.
 
 
 <a id="nestedblock--port_forward_client_config"></a>
@@ -253,5 +287,6 @@ Required:
 
 Optional:
 
-- `ssh_key_path` (String) SSH user's private key path. Defaults to `~/.ssh/id_rsa`.
-- `ssh_user` (String) SSH user name. Defaults to current user name.
+- `mode` (String) How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.
+- `ssh_key_path` (String) SSH user's private key path (`ssh` mode only). Defaults to `~/.ssh/id_rsa`.
+- `ssh_user` (String) SSH user name (`ssh` mode only). Defaults to current user name.

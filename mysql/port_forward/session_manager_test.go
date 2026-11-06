@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -62,6 +63,7 @@ func ssmConfigResource() *schema.Resource {
 				Schema: map[string]*schema.Schema{
 					"ec2_instance_id": {Type: schema.TypeString, Required: true},
 					"rds_endpoint":    {Type: schema.TypeString, Required: true},
+					"mode":            {Type: schema.TypeString, Optional: true, Default: "ssh"},
 					"ssh_user":        {Type: schema.TypeString, Optional: true},
 					"ssh_key_path":    {Type: schema.TypeString, Optional: true},
 					"aws_profile": {
@@ -459,5 +461,88 @@ func TestParseSessionConfigUnknownProfile(t *testing.T) {
 	})
 	if _, _, err := ParseSessionConfig(d); err == nil {
 		t.Fatal("want error for unknown profile")
+	}
+}
+
+func TestParseSessionConfigPortForwardingMode(t *testing.T) {
+	setupOfflineEnv(t)
+	res := ssmConfigResource()
+	key := "aws_ssm_session_manager_client_config"
+	missingKey := filepath.Join(t.TempDir(), "no-such-key")
+
+	parse := func(t *testing.T, m map[string]interface{}) (*sessionConfig, map[string]string, error) {
+		t.Helper()
+		d := schema.TestResourceDataRaw(t, res.Schema, map[string]interface{}{key: []interface{}{m}})
+		return ParseSessionConfig(d)
+	}
+
+	for name, tc := range map[string]struct {
+		endpoint string
+		host     string
+		port     int
+	}{
+		"with port":    {"db.example:3307", "db.example", 3307},
+		"without port": {"db.example", "db.example", 3306},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sc, pf, err := parse(t, map[string]interface{}{
+				"ec2_instance_id": "i-0123",
+				"rds_endpoint":    tc.endpoint,
+				"mode":            "port_forwarding",
+				// A missing key file must not matter in this mode.
+				"ssh_key_path": missingKey,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pf != nil {
+				t.Errorf("pfConf = %v, want nil", pf)
+			}
+			if sc.mode != ModePortForwarding || sc.remoteHost != tc.host || sc.remotePort != tc.port || sc.instanceID != "i-0123" {
+				t.Errorf("unexpected sessionConfig: %+v", sc)
+			}
+			if p, err := ParsePFConfig(pf, 1); p != nil || err != nil {
+				t.Errorf("ParsePFConfig(nil) = (%v, %v)", p, err)
+			}
+		})
+	}
+
+	t.Run("bad port", func(t *testing.T) {
+		if _, _, err := parse(t, map[string]interface{}{
+			"ec2_instance_id": "i-0123", "rds_endpoint": "db:abc", "mode": "port_forwarding",
+		}); err == nil {
+			t.Fatal("want error")
+		}
+	})
+
+	t.Run("ssh mode still requires the key", func(t *testing.T) {
+		sc, pf, err := parse(t, map[string]interface{}{
+			"ec2_instance_id": "i-0123", "rds_endpoint": "db.example:3306", "ssh_key_path": missingKey,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sc.mode != ModeSSH {
+			t.Errorf("mode = %q", sc.mode)
+		}
+		if _, err := ParsePFConfig(pf, 1); err == nil || !strings.Contains(err.Error(), "ssh_key_path") {
+			t.Fatalf("want ssh_key_path error, got %v", err)
+		}
+	})
+}
+
+func TestPortForwardingStartSessionInput(t *testing.T) {
+	in := portForwardingInput("i-0123", "db.example", 3306, 13306)
+	want := &ssm.StartSessionInput{
+		DocumentName: aws.String("AWS-StartPortForwardingSessionToRemoteHost"),
+		Parameters: map[string][]string{
+			"host":            {"db.example"},
+			"portNumber":      {"3306"},
+			"localPortNumber": {"13306"},
+		},
+		Target: aws.String("i-0123"),
+	}
+	if !reflect.DeepEqual(in, want) {
+		t.Errorf("got %+v, want %+v", in, want)
 	}
 }

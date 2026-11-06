@@ -39,10 +39,10 @@ provider "mysql" {
   password = aws_db_instance.default.password
 
   aws_ssm_session_manager_client_config {
+    # No SSH keys or sshd are needed in this mode.
+    mode            = "port_forwarding"
     ec2_instance_id = resource.aws_instance.bastion.id
     rds_endpoint    = resource.aws_db_instance.default.endpoint
-    ssh_user        = local.ssh_user
-    ssh_key_path    = local.ssh_key_path
     aws_profile     = local.aws_profile
     region          = local.region
   }

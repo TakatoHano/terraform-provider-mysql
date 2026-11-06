@@ -3,11 +3,15 @@ package port_forward
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,10 +31,54 @@ type ssmAPI interface {
 	TerminateSession(ctx context.Context, in *ssm.TerminateSessionInput, optFns ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error)
 }
 
+const (
+	// ModeSSH tunnels SSH over an SSM session (AWS-StartSSHSession).
+	ModeSSH = "ssh"
+	// ModePortForwarding uses AWS-StartPortForwardingSessionToRemoteHost and
+	// needs no SSH.
+	ModePortForwarding = "port_forwarding"
+
+	portForwardingDocument = "AWS-StartPortForwardingSessionToRemoteHost"
+	defaultRemotePort      = 3306
+)
+
+// Readiness polling of the local port opened by session-manager-plugin. They
+// are variables so that tests can shorten them.
+var (
+	pluginReadyTimeout  = 30 * time.Second
+	pluginReadyInterval = 200 * time.Millisecond
+)
+
 type sessionConfig struct {
 	instanceID string
 	profile    string
 	awsConfig  *aws.Config
+	// mode is ModeSSH or ModePortForwarding; empty means ModeSSH.
+	mode string
+	// remoteHost and remotePort are the RDS endpoint (port_forwarding mode).
+	remoteHost string
+	remotePort int
+}
+
+func (conf *sessionConfig) isPortForwarding() bool {
+	return conf != nil && conf.mode == ModePortForwarding
+}
+
+// TunnelKey identifies the settings that determine the tunnel, so that a
+// later provider configuration with the same settings can reuse it.
+func (conf *sessionConfig) TunnelKey() string {
+	if conf == nil {
+		return ""
+	}
+	region := ""
+	if conf.awsConfig != nil {
+		region = conf.awsConfig.Region
+	}
+	mode := conf.mode
+	if mode == "" {
+		mode = ModeSSH
+	}
+	return fmt.Sprintf("%s|%s|%s|%d|%s|%s", mode, conf.instanceID, conf.remoteHost, conf.remotePort, conf.profile, region)
 }
 
 func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]string, error) {
@@ -46,7 +94,13 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 	confMap := v.([]interface{})[0].(map[string]interface{})
 	pfConf := map[string]string{}
 
-	sessionConf := &sessionConfig{}
+	sessionConf := &sessionConfig{mode: ModeSSH}
+	if v, ok := confMap["mode"].(string); ok && v != "" {
+		sessionConf.mode = v
+	}
+	if sessionConf.mode != ModeSSH && sessionConf.mode != ModePortForwarding {
+		return nil, nil, fmt.Errorf("invalid mode %q: must be %q or %q", sessionConf.mode, ModeSSH, ModePortForwarding)
+	}
 	if v, ok := confMap["ec2_instance_id"].(string); ok && v != "" {
 		sessionConf.instanceID = v
 	}
@@ -83,8 +137,21 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 		return nil, nil, err
 	}
 
-	if v, ok := confMap["rds_endpoint"].(string); ok && v != "" {
-		pfConf["db_endpoint"] = v
+	rdsEndpoint, _ := confMap["rds_endpoint"].(string)
+
+	if sessionConf.mode == ModePortForwarding {
+		// No SSH: ssh_user/ssh_key_path are ignored and pfConf stays nil.
+		host, port, err := splitRDSEndpoint(rdsEndpoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		sessionConf.remoteHost = host
+		sessionConf.remotePort = port
+		return sessionConf, nil, nil
+	}
+
+	if rdsEndpoint != "" {
+		pfConf["db_endpoint"] = rdsEndpoint
 	}
 
 	pfConf["ssh_user"] = currentUsername()
@@ -101,9 +168,41 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 
 }
 
+// splitRDSEndpoint parses host[:port], defaulting the port to 3306.
+func splitRDSEndpoint(endpoint string) (string, int, error) {
+	if endpoint == "" {
+		return "", 0, fmt.Errorf("not set rds_endpoint")
+	}
+	host, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		// No port (or a bare IPv6 literal): use the MySQL default.
+		host = strings.TrimSuffix(strings.TrimPrefix(endpoint, "["), "]")
+		if host == "" || strings.ContainsAny(host, "/ ") {
+			return "", 0, fmt.Errorf("invalid rds_endpoint %q", endpoint)
+		}
+		return host, defaultRemotePort, nil
+	}
+	if host == "" {
+		return "", 0, fmt.Errorf("invalid rds_endpoint %q: empty host", endpoint)
+	}
+	if portStr == "" {
+		return host, defaultRemotePort, nil
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("invalid rds_endpoint %q: bad port %q", endpoint, portStr)
+	}
+	return host, port, nil
+}
+
 // Connect opens the configured tunnel. It returns (nil, nil) when no port
 // forwarding is configured. The caller owns the returned Tunnel and must Close it.
-func Connect(sessConf *sessionConfig, pfConf *portFowardConfig) (*Tunnel, error) {
+// localPort is the local port to listen on in port_forwarding mode; in ssh mode
+// the port comes from pfConf.
+func Connect(sessConf *sessionConfig, pfConf *portFowardConfig, localPort uint16) (*Tunnel, error) {
+	if sessConf.isPortForwarding() {
+		return sessConf.connectPortForwarding(localPort)
+	}
 	if pfConf == nil {
 		return nil, nil
 	}
@@ -192,7 +291,20 @@ func openSession(ctx context.Context, svc ssmAPI, instanceID, profile, region, e
 		return nil, nil, err
 	}
 
-	close := func() error {
+	close := terminateFunc(svc, out)
+
+	cmd, err := sessionManagerPlugin(in, out, profile, region, endpoint)
+	if err != nil {
+		defer close()
+		return nil, nil, err
+	}
+
+	return cmd, close, nil
+}
+
+// terminateFunc returns a func that terminates the SSM session out.
+func terminateFunc(svc ssmAPI, out *ssm.StartSessionOutput) func() error {
+	return func() error {
 		in := &ssm.TerminateSessionInput{
 			SessionId: out.SessionId,
 		}
@@ -204,14 +316,114 @@ func openSession(ctx context.Context, svc ssmAPI, instanceID, profile, region, e
 		}
 		return nil
 	}
+}
 
-	cmd, err := sessionManagerPlugin(in, out, profile, region, endpoint)
+// portForwardingInput builds the StartSession request for port_forwarding mode.
+func portForwardingInput(instanceID, host string, remotePort int, localPort uint16) *ssm.StartSessionInput {
+	return &ssm.StartSessionInput{
+		DocumentName: aws.String(portForwardingDocument),
+		Parameters: map[string][]string{
+			"host":            {host},
+			"portNumber":      {strconv.Itoa(remotePort)},
+			"localPortNumber": {strconv.Itoa(int(localPort))},
+		},
+		Target: aws.String(instanceID),
+	}
+}
+
+func (conf *sessionConfig) connectPortForwarding(localPort uint16) (*Tunnel, error) {
+	ctx := context.Background()
+	endpoint, err := resolveSSMEndpoint(ctx, *conf.awsConfig)
 	if err != nil {
-		defer close()
-		return nil, nil, err
+		return nil, err
+	}
+	return openPortForwardingSession(ctx, newSSMClient(*conf.awsConfig), conf, localPort, endpoint)
+}
+
+// logWriter forwards the plugin's output to the provider log.
+type logWriter struct{ stream string }
+
+func (w logWriter) Write(p []byte) (int, error) {
+	log.Printf("[DEBUG] session-manager-plugin %s: %s", w.stream, strings.TrimRight(string(p), "\r\n"))
+	return len(p), nil
+}
+
+// openPortForwardingSession starts an AWS-StartPortForwardingSessionToRemoteHost
+// session and the session-manager-plugin, which itself listens on
+// 127.0.0.1:localPort. It returns once that port accepts connections. The
+// plugin's stdout and stderr go to the provider's debug log.
+func openPortForwardingSession(ctx context.Context, svc ssmAPI, conf *sessionConfig, localPort uint16, endpoint string) (*Tunnel, error) {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(localPort)))
+	// Something already listening would make the readiness check pass
+	// falsely and the plugin fail to bind.
+	if c, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+		c.Close()
+		return nil, fmt.Errorf("local port %d is already in use", localPort)
 	}
 
-	return cmd, close, nil
+	in := portForwardingInput(conf.instanceID, conf.remoteHost, conf.remotePort, localPort)
+	out, err := svc.StartSession(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	terminate := terminateFunc(svc, out)
+
+	cmd, err := sessionManagerPlugin(in, out, conf.profile, conf.awsConfig.Region, endpoint)
+	if err != nil {
+		_ = terminate()
+		return nil, err
+	}
+	cmd.Stdout = logWriter{"stdout"}
+	cmd.Stderr = logWriter{"stderr"}
+	if err := cmd.Start(); err != nil {
+		_ = terminate()
+		return nil, fmt.Errorf("start session-manager-plugin: %w", err)
+	}
+
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	kill := func() error {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+		<-exited
+		return nil
+	}
+
+	fail := func(err error) (*Tunnel, error) {
+		_ = kill()
+		_ = terminate()
+		return nil, err
+	}
+	notReady := fmt.Errorf("session-manager-plugin did not open local port %d within %s; is the plugin installed and is the instance SSM-managed?", localPort, pluginReadyTimeout)
+
+	deadline := time.NewTimer(pluginReadyTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(pluginReadyInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-exited:
+			return fail(notReady)
+		default:
+		}
+		if c, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+			c.Close()
+			return &Tunnel{killProxy: kill, closeSession: terminate}, nil
+		}
+		select {
+		case <-exited:
+			return fail(notReady)
+		case <-deadline.C:
+			return fail(notReady)
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func sessionManagerPlugin(

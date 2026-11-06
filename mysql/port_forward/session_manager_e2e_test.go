@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,9 @@ const (
 	helperEnvFlag = "GO_WANT_HELPER_PROCESS"
 	helperEnvAddr = "FAKE_PLUGIN_SSH_ADDR"
 	helperEnvArgs = "FAKE_PLUGIN_ARGS_FILE"
+	// helperEnvMode selects the fake plugin behaviour: "" (ssh over stdio),
+	// "listen" (port forwarding) or "exit" (exit immediately).
+	helperEnvMode = "FAKE_PLUGIN_MODE"
 )
 
 // TestHelperProcess is not a real test: it is the body of the fake
@@ -50,6 +54,12 @@ func TestHelperProcess(t *testing.T) {
 		b, _ := json.Marshal(args)
 		_ = os.WriteFile(f, b, 0o600)
 	}
+	switch os.Getenv(helperEnvMode) {
+	case "exit":
+		os.Exit(3)
+	case "listen":
+		runFakeForwardingPlugin(args)
+	}
 	conn, err := net.Dial("tcp", os.Getenv(helperEnvAddr))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fake plugin dial:", err)
@@ -63,11 +73,48 @@ func TestHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+// runFakeForwardingPlugin behaves like the real plugin for
+// AWS-StartPortForwardingSessionToRemoteHost: it listens on localPortNumber
+// and proxies every connection to host:portNumber. It never returns.
+func runFakeForwardingPlugin(args []string) {
+	var in struct {
+		Parameters map[string][]string
+	}
+	if len(args) != 6 || json.Unmarshal([]byte(args[4]), &in) != nil {
+		fmt.Fprintln(os.Stderr, "fake plugin: bad args", args)
+		os.Exit(2)
+	}
+	p := in.Parameters
+	l, err := net.Listen("tcp", "127.0.0.1:"+p["localPortNumber"][0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fake plugin listen:", err)
+		os.Exit(2)
+	}
+	target := net.JoinHostPort(p["host"][0], p["portNumber"][0])
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			os.Exit(0)
+		}
+		go func() {
+			defer c.Close()
+			r, err := net.Dial("tcp", target)
+			if err != nil {
+				return
+			}
+			defer r.Close()
+			go func() { _, _ = io.Copy(r, c); r.Close() }()
+			_, _ = io.Copy(c, r)
+		}()
+	}
+}
+
 // fakeSSMServer implements the two SSM operations over AWS JSON 1.1.
 type fakeSSMServer struct {
 	*httptest.Server
 	mu         sync.Mutex
 	starts     int
+	startBody  []string
 	terminated []string
 }
 
@@ -82,6 +129,7 @@ func newFakeSSMServer(t *testing.T) *fakeSSMServer {
 		switch r.Header.Get("X-Amz-Target") {
 		case "AmazonSSM.StartSession":
 			f.starts++
+			f.startBody = append(f.startBody, string(body))
 			_, _ = w.Write([]byte(`{"SessionId":"s-1","TokenValue":"t","StreamUrl":"wss://x"}`))
 		case "AmazonSSM.TerminateSession":
 			var in struct{ SessionId string }
@@ -107,13 +155,17 @@ func (f *fakeSSMServer) counts() (int, []string) {
 // plugin, connected to sshAddr. It returns the file the plugin records its
 // argv in.
 func useFakePlugin(t *testing.T, sshAddr string) (string, <-chan *exec.Cmd) {
+	return useFakePluginMode(t, sshAddr, "")
+}
+
+func useFakePluginMode(t *testing.T, sshAddr, mode string) (string, <-chan *exec.Cmd) {
 	t.Helper()
 	cmds := make(chan *exec.Cmd, 4)
 	argsFile := filepath.Join(t.TempDir(), "plugin-args.json")
 	orig := newPluginCmd
 	newPluginCmd = func(_ string, args []string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestHelperProcess$", "--"}, args...)...)
-		cmd.Env = append(os.Environ(), helperEnvFlag+"=1", helperEnvAddr+"="+sshAddr, helperEnvArgs+"="+argsFile)
+		cmd.Env = append(os.Environ(), helperEnvFlag+"=1", helperEnvAddr+"="+sshAddr, helperEnvArgs+"="+argsFile, helperEnvMode+"="+mode)
 		cmds <- cmd
 		return cmd
 	}
@@ -236,6 +288,102 @@ func TestSessionConnectSSHRejected(t *testing.T) {
 	tun, err := sc.connect(pf)
 	if err == nil || tun != nil {
 		t.Fatalf("connect = (%v, %v), want error and nil tunnel", tun, err)
+	}
+	if starts, term := fake.counts(); starts != 1 || len(term) != 1 || term[0] != "s-1" {
+		t.Errorf("starts=%d terminated=%v, want 1 start and exactly [s-1]", starts, term)
+	}
+	if c, err := net.DialTimeout("tcp", local, time.Second); err == nil {
+		c.Close()
+		t.Error("local port is listening after failed connect")
+	}
+}
+
+func newPortForwardingE2E(t *testing.T, fake *fakeSSMServer) (*sessionConfig, string, uint16) {
+	t.Helper()
+	setupOfflineEnv(t)
+	echoAddr, _ := startEchoServer(t)
+	host, portStr, _ := net.SplitHostPort(echoAddr)
+	port, _ := strconv.Atoi(portStr)
+	cfg := aws.Config{
+		Region:           "us-east-1",
+		Credentials:      credentials.NewStaticCredentialsProvider("AKID", "SECRET", ""),
+		BaseEndpoint:     aws.String(fake.URL),
+		RetryMaxAttempts: 1,
+	}
+	sc := &sessionConfig{instanceID: "i-0123", awsConfig: &cfg, mode: ModePortForwarding, remoteHost: host, remotePort: port}
+	lp := freePort(t)
+	return sc, net.JoinHostPort("127.0.0.1", strconv.Itoa(int(lp))), lp
+}
+
+func TestPortForwardingConnectEndToEnd(t *testing.T) {
+	fake := newFakeSSMServer(t)
+	argsFile, cmds := useFakePluginMode(t, "", "listen")
+	sc, local, lp := newPortForwardingE2E(t, fake)
+
+	tun, err := Connect(sc, nil, lp)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if tun.listener != nil || tun.client != nil {
+		t.Error("port_forwarding tunnel must not own a listener or ssh client")
+	}
+	starts, term := fake.counts()
+	if starts != 1 || len(term) != 0 {
+		t.Fatalf("after connect: starts=%d terminated=%v", starts, term)
+	}
+	var got struct {
+		DocumentName string
+		Target       string
+		Parameters   map[string][]string
+	}
+	if err := json.Unmarshal([]byte(fake.startBody[0]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.DocumentName != "AWS-StartPortForwardingSessionToRemoteHost" || got.Target != "i-0123" ||
+		got.Parameters["host"][0] != sc.remoteHost || got.Parameters["portNumber"][0] != strconv.Itoa(sc.remotePort) ||
+		got.Parameters["localPortNumber"][0] != strconv.Itoa(int(lp)) {
+		t.Errorf("unexpected StartSession request: %s", fake.startBody[0])
+	}
+
+	echoRoundTrip(t, local, "through port forwarding")
+	echoRoundTrip(t, local, "again")
+
+	b, err := os.ReadFile(argsFile)
+	var args []string
+	if err != nil || json.Unmarshal(b, &args) != nil || len(args) != 6 || args[1] != "us-east-1" || args[2] != "StartSession" || args[5] != fake.URL {
+		t.Fatalf("plugin args = %q (%v)", b, err)
+	}
+
+	if err := tun.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := tun.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if _, term := fake.counts(); len(term) != 1 || term[0] != "s-1" {
+		t.Errorf("terminate calls = %v, want exactly [s-1]", term)
+	}
+	if c, err := net.DialTimeout("tcp", local, time.Second); err == nil {
+		c.Close()
+		t.Error("local port still accepts connections after Close")
+	}
+	cmd := <-cmds
+	if cmd.ProcessState == nil {
+		t.Error("plugin process was not reaped by Close")
+	}
+}
+
+func TestPortForwardingPluginExitsEarly(t *testing.T) {
+	fake := newFakeSSMServer(t)
+	_, _ = useFakePluginMode(t, "", "exit")
+	sc, local, lp := newPortForwardingE2E(t, fake)
+
+	tun, err := Connect(sc, nil, lp)
+	if err == nil || tun != nil {
+		t.Fatalf("Connect = (%v, %v), want error and nil tunnel", tun, err)
+	}
+	if !strings.Contains(err.Error(), "did not open local port") {
+		t.Errorf("err = %v", err)
 	}
 	if starts, term := fake.counts(); starts != 1 || len(term) != 1 || term[0] != "s-1" {
 		t.Errorf("starts=%d terminated=%v, want 1 start and exactly [s-1]", starts, term)
