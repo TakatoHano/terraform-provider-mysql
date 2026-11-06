@@ -141,6 +141,16 @@ jobs:
             -e PUBLIC_KEY="$(cat "$HOME/.ssh/id_tunnel.pub")" \
             -e SUDO_ACCESS=false \
             lscr.io/linuxserver/openssh-server:latest
+      # The image ships with "AllowTcpForwarding no"; the tunnel needs it.
+      - name: Enable TCP forwarding in sshd
+        run: |
+          for _ in $(seq 1 30); do
+            docker exec sshd test -f /config/sshd/sshd_config && break
+            sleep 1
+          done
+          docker exec sshd sed -i 's/^AllowTcpForwarding.*/AllowTcpForwarding yes/' /config/sshd/sshd_config
+          docker exec sshd grep -n '^AllowTcpForwarding' /config/sshd/sshd_config
+          docker restart sshd
       - name: Wait for sshd
         run: |
           for _ in $(seq 1 30); do
@@ -154,9 +164,6 @@ jobs:
           docker logs sshd
           echo "sshd did not become ready" >&2
           exit 1
-      - name: Check sshd forwarding settings
-        run: |
-          docker exec sshd sh -c 'grep -rniE "AllowTcpForwarding|PermitOpen" /config/sshd /etc/ssh 2>/dev/null || true'
       - name: Check MySQL is reachable from sshd
         run: docker exec sshd nc -z -w 5 mysql 3306
       - name: Tunnel acceptance tests
