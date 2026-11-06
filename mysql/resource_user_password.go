@@ -3,7 +3,7 @@ package mysql
 import (
 	"fmt"
 
-	"github.com/gofrs/uuid"
+	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/encryption"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
