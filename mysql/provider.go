@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TakatoHano/terraform-provider-mysql/mysql/port_forward"
@@ -31,6 +33,9 @@ type MySQLConfiguration struct {
 	Config          *mysql.Config
 	MaxConnLifetime time.Duration
 	MaxOpenConns    int
+
+	mu sync.Mutex
+	db *sql.DB
 }
 
 func Provider() terraform.ResourceProvider {
@@ -43,7 +48,7 @@ func Provider() terraform.ResourceProvider {
 				ValidateFunc: func(v interface{}, k string) (ws []string, errors []error) {
 					value := v.(string)
 					if value == "" {
-						errors = append(errors, fmt.Errorf("Endpoint must not be an empty string"))
+						errors = append(errors, fmt.Errorf("endpoint must not be an empty string"))
 					}
 
 					return
@@ -69,7 +74,7 @@ func Provider() terraform.ResourceProvider {
 					"ALL_PROXY",
 					"all_proxy",
 				}, nil),
-				ValidateFunc: validation.StringMatch(regexp.MustCompile("^socks5h?://.*:\\d+$"), "The proxy URL is not a valid socks url."),
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^socks5h?://.*:\d+$`), "The proxy URL is not a valid socks url."),
 			},
 
 			"tls": {
@@ -206,8 +211,11 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		return nil, err
 	}
 
-	mysql.RegisterDial("tcp", func(network string) (net.Conn, error) {
-		return dialer.Dial("tcp", network)
+	mysql.RegisterDialContext("tcp", func(ctx context.Context, addr string) (net.Conn, error) {
+		if cd, ok := dialer.(proxy.ContextDialer); ok {
+			return cd.DialContext(ctx, "tcp", addr)
+		}
+		return dialer.Dial("tcp", addr)
 	})
 
 	sessionConf, pfConfMap, err := port_forward.ParseSessionConfig(d)
@@ -304,23 +312,29 @@ func serverVersionString(db *sql.DB) (string, error) {
 }
 
 func connectToMySQL(conf *MySQLConfiguration) (*sql.DB, error) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+
+	if conf.db != nil {
+		return conf.db, nil
+	}
 
 	dsn := conf.Config.FormatDSN()
 	var db *sql.DB
-	var err error
 
 	// When provisioning a database server there can often be a lag between
 	// when Terraform thinks it's available and when it is actually available.
 	// This is particularly acute when provisioning a server and then immediately
 	// trying to provision a database on it.
 	retryError := resource.Retry(5*time.Minute, func() *resource.RetryError {
+		var err error
 		db, err = sql.Open("mysql", dsn)
 		if err != nil {
 			return resource.RetryableError(err)
 		}
 
-		err = db.Ping()
-		if err != nil {
+		if err = db.Ping(); err != nil {
+			db.Close()
 			return resource.RetryableError(err)
 		}
 
@@ -328,9 +342,10 @@ func connectToMySQL(conf *MySQLConfiguration) (*sql.DB, error) {
 	})
 
 	if retryError != nil {
-		return nil, fmt.Errorf("Could not connect to server: %s", retryError)
+		return nil, fmt.Errorf("could not connect to server: %s", retryError)
 	}
 	db.SetConnMaxLifetime(conf.MaxConnLifetime)
 	db.SetMaxOpenConns(conf.MaxOpenConns)
+	conf.db = db
 	return db, nil
 }
