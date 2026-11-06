@@ -1,32 +1,36 @@
 package port_forward
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
+	"time"
 
-	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
-	"github.com/aws/aws-sdk-go/aws"
-	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
-	"github.com/aws/aws-sdk-go/aws/session"
-	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
-	"github.com/aws/aws-sdk-go/service/ssm"
-	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // newSSMClient builds the SSM API client used by connect. It is a variable so
 // that tests can inject a mock.
-var newSSMClient = func(s *session.Session) ssmiface.SSMAPI { return ssm.New(s) }
+var newSSMClient = func(cfg aws.Config) ssmAPI { return ssm.NewFromConfig(cfg) }
+
+// ssmAPI is the subset of the SSM client used by this package.
+type ssmAPI interface {
+	StartSession(ctx context.Context, in *ssm.StartSessionInput, optFns ...func(*ssm.Options)) (*ssm.StartSessionOutput, error)
+	TerminateSession(ctx context.Context, in *ssm.TerminateSessionInput, optFns ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error)
+}
 
 type sessionConfig struct {
 	instanceID string
 	profile    string
-	session    *session.Session
+	awsConfig  *aws.Config
 }
 
 func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]string, error) {
@@ -60,11 +64,20 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 		region = v
 	}
 
-	sessionConf.session, _ = session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable, // Must be set to enable
-		Profile:           profile,
-		Config:            aws.Config{Region: aws.String(region)},
-	})
+	// Only pass profile/region when set so environment and shared-config
+	// defaults keep working.
+	var loadOpts []func(*config.LoadOptions) error
+	if profile != "" {
+		loadOpts = append(loadOpts, config.WithSharedConfigProfile(profile))
+	}
+	if region != "" {
+		loadOpts = append(loadOpts, config.WithRegion(region))
+	}
+	awsCfg, err := config.LoadDefaultConfig(context.Background(), loadOpts...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load AWS config: %w", err)
+	}
+	sessionConf.awsConfig = &awsCfg
 
 	if err := sessionConf.validate(); err != nil {
 		return nil, nil, err
@@ -106,7 +119,7 @@ func (conf *sessionConfig) validate() error {
 	if conf.instanceID == "" {
 		errors = multierror.Append(errors, fmt.Errorf("not set ec2_instance_id"))
 	}
-	if conf.session == nil {
+	if conf.awsConfig == nil {
 		errors = multierror.Append(errors, fmt.Errorf("AWS configure is not a valid"))
 	}
 
@@ -118,11 +131,15 @@ func (conf *sessionConfig) validate() error {
 }
 
 func (conf *sessionConfig) connect(pfConf *portFowardConfig) (*Tunnel, error) {
-	// Region and endpoint are resolved once from the session (the same values
-	// ssm.New(conf.session) would use) so openSession only needs the interface.
-	region := aws.StringValue(conf.session.Config.Region)
-	endpoint := conf.session.ClientConfig(ssm.ServiceName).Endpoint
-	proxyCmd, closeSession, err := openSession(newSSMClient(conf.session), conf.instanceID, conf.profile, region, endpoint)
+	// Region and endpoint are resolved once from the config so openSession
+	// only needs the interface.
+	ctx := context.Background()
+	region := conf.awsConfig.Region
+	endpoint, err := resolveSSMEndpoint(ctx, *conf.awsConfig)
+	if err != nil {
+		return nil, err
+	}
+	proxyCmd, closeSession, err := openSession(ctx, newSSMClient(*conf.awsConfig), conf.instanceID, conf.profile, region, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -149,15 +166,28 @@ func (conf *sessionConfig) connect(pfConf *portFowardConfig) (*Tunnel, error) {
 	return t, nil
 }
 
-func openSession(svc ssmiface.SSMAPI, instanceID, profile, region, endpoint string) (*exec.Cmd, func() error, error) {
+// resolveSSMEndpoint returns the SSM endpoint URL for cfg's region, honoring a
+// custom base endpoint when configured.
+func resolveSSMEndpoint(ctx context.Context, cfg aws.Config) (string, error) {
+	ep, err := ssm.NewDefaultEndpointResolverV2().ResolveEndpoint(ctx, ssm.EndpointParameters{
+		Region:   aws.String(cfg.Region),
+		Endpoint: cfg.BaseEndpoint,
+	})
+	if err != nil {
+		return "", fmt.Errorf("resolve SSM endpoint: %w", err)
+	}
+	return ep.URI.String(), nil
+}
+
+func openSession(ctx context.Context, svc ssmAPI, instanceID, profile, region, endpoint string) (*exec.Cmd, func() error, error) {
 	in := &ssm.StartSessionInput{
 		DocumentName: aws.String("AWS-StartSSHSession"),
-		Parameters: map[string][]*string{
-			"portNumber": {aws.String("22")},
+		Parameters: map[string][]string{
+			"portNumber": {"22"},
 		},
 		Target: aws.String(instanceID),
 	}
-	out, err := svc.StartSession(in)
+	out, err := svc.StartSession(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -166,7 +196,10 @@ func openSession(svc ssmiface.SSMAPI, instanceID, profile, region, endpoint stri
 		in := &ssm.TerminateSessionInput{
 			SessionId: out.SessionId,
 		}
-		if _, err := svc.TerminateSession(in); err != nil {
+		// Use a fresh context: ctx may be done by the time cleanup runs.
+		tctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := svc.TerminateSession(tctx, in); err != nil {
 			return err
 		}
 		return nil
