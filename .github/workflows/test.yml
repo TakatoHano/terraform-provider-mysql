@@ -1,0 +1,34 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: gofmt
+        run: bash scripts/gofmtcheck.sh
+      - name: Vet
+        run: go vet ./...
+      # staticcheck will be added once Go is upgraded (current staticcheck releases do not install on Go 1.18).
+      - name: Unit tests
+        run: go test ./... -timeout 120s
