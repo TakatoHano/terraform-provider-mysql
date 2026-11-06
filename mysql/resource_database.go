@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -8,7 +9,8 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 const defaultCharacterSetKeyword = "CHARACTER SET "
@@ -17,12 +19,12 @@ const unknownDatabaseErrCode = 1049
 
 func resourceDatabase() *schema.Resource {
 	return &schema.Resource{
-		Create: CreateDatabase,
-		Update: UpdateDatabase,
-		Read:   ReadDatabase,
-		Delete: DeleteDatabase,
+		CreateContext: CreateDatabase,
+		UpdateContext: UpdateDatabase,
+		ReadContext:   ReadDatabase,
+		DeleteContext: DeleteDatabase,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -62,46 +64,46 @@ func suppressUTF8Alias(k, old, new string, d *schema.ResourceData) bool {
 	return norm(old) == norm(new)
 }
 
-func CreateDatabase(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func CreateDatabase(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	stmtSQL := databaseConfigSQL("CREATE", d)
 	log.Println("Executing statement:", stmtSQL)
 
-	_, err = db.Exec(stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	d.SetId(d.Get("name").(string))
 
-	return ReadDatabase(d, meta)
+	return ReadDatabase(ctx, d, meta)
 }
 
-func UpdateDatabase(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func UpdateDatabase(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	stmtSQL := databaseConfigSQL("ALTER", d)
 	log.Println("Executing statement:", stmtSQL)
 
-	_, err = db.Exec(stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
-	return ReadDatabase(d, meta)
+	return ReadDatabase(ctx, d, meta)
 }
 
-func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func ReadDatabase(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	// This is kinda flimsy-feeling, since it depends on the formatting
@@ -114,7 +116,7 @@ func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
 
 	log.Println("Executing query:", stmtSQL)
 	var createSQL, _database string
-	err = db.QueryRow(stmtSQL).Scan(&_database, &createSQL)
+	err = db.QueryRowContext(ctx, stmtSQL).Scan(&_database, &createSQL)
 	if err != nil {
 		if mysqlErr, ok := err.(*mysql.MySQLError); ok {
 			if mysqlErr.Number == unknownDatabaseErrCode {
@@ -122,7 +124,7 @@ func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
 				return nil
 			}
 		}
-		return fmt.Errorf("error during show create database: %s", err)
+		return diag.Errorf("error during show create database: %s", err)
 	}
 
 	defaultCharset := extractIdentAfter(createSQL, defaultCharacterSetKeyword)
@@ -138,28 +140,28 @@ func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
 		requiredVersion, _ := version.NewVersion("8.0.0")
 		currentVersion, err := serverVersion(db)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 
 		serverVersionString, err := serverVersionString(db)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 
 		// MySQL 8 returns more data in a row.
 		var res error
 		if !strings.Contains(serverVersionString, "MariaDB") && currentVersion.GreaterThan(requiredVersion) {
-			res = db.QueryRow(stmtSQL, defaultCharset).Scan(&defaultCollation, &empty, &empty, &empty, &empty, &empty, &empty)
+			res = db.QueryRowContext(ctx, stmtSQL, defaultCharset).Scan(&defaultCollation, &empty, &empty, &empty, &empty, &empty, &empty)
 		} else {
-			res = db.QueryRow(stmtSQL, defaultCharset).Scan(&defaultCollation, &empty, &empty, &empty, &empty, &empty)
+			res = db.QueryRowContext(ctx, stmtSQL, defaultCharset).Scan(&defaultCollation, &empty, &empty, &empty, &empty, &empty)
 		}
 
 		if res != nil {
 			if res == sql.ErrNoRows {
-				return fmt.Errorf("charset %s has no default collation", defaultCharset)
+				return diag.Errorf("charset %s has no default collation", defaultCharset)
 			}
 
-			return fmt.Errorf("error getting default charset: %s, %s", res, defaultCharset)
+			return diag.Errorf("error getting default charset: %s, %s", res, defaultCharset)
 		}
 	}
 
@@ -170,21 +172,21 @@ func ReadDatabase(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func DeleteDatabase(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func DeleteDatabase(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	name := d.Id()
 	stmtSQL := "DROP DATABASE " + quoteIdentifier(name)
 	log.Println("Executing statement:", stmtSQL)
 
-	_, err = db.Exec(stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err == nil {
 		d.SetId("")
 	}
-	return err
+	return diag.FromErr(err)
 }
 
 func databaseConfigSQL(verb string, d *schema.ResourceData) string {

@@ -53,3 +53,7 @@ provider "mysql" {
   }
 }
 ```
+
+## Debugging
+
+Run the provider binary with `-debug` to start it in debugger-friendly mode; it prints the `TF_REATTACH_PROVIDERS` value to use with Terraform.

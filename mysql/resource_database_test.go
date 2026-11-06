@@ -1,23 +1,24 @@
 package mysql
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/go-sql-driver/mysql"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccDatabase(t *testing.T) {
 	dbName := "terraform_acceptance_test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccDatabaseCheckDestroy(dbName),
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccDatabaseCheckDestroy(dbName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccDatabaseConfig_basic(dbName),
@@ -40,9 +41,9 @@ func TestAccDatabase_collationChange(t *testing.T) {
 	resourceName := "mysql_database.test"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccDatabaseCheckDestroy(dbName),
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccDatabaseCheckDestroy(dbName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccDatabaseConfig_full(dbName, charset1, collation1),
@@ -57,7 +58,7 @@ func TestAccDatabase_collationChange(t *testing.T) {
 			},
 			{
 				PreConfig: func() {
-					db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+					db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 					if err != nil {
 						return
 					}
@@ -88,7 +89,7 @@ func testAccDatabaseCheck_full(rn string, name string, charset string, collation
 			return fmt.Errorf("database id not set")
 		}
 
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
@@ -115,7 +116,7 @@ func testAccDatabaseCheck_full(rn string, name string, charset string, collation
 
 func testAccDatabaseCheckDestroy(name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}

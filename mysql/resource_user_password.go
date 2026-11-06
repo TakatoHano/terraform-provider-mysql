@@ -1,19 +1,21 @@
 package mysql
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/TakatoHano/terraform-provider-mysql/mysql/internal/encryption"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/encryption"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func resourceUserPassword() *schema.Resource {
 	return &schema.Resource{
-		Create: SetUserPassword,
-		Read:   ReadUserPassword,
-		Delete: DeleteUserPassword,
+		CreateContext: SetUserPassword,
+		ReadContext:   ReadUserPassword,
+		DeleteContext: DeleteUserPassword,
 		Schema: map[string]*schema.Schema{
 			"user": {
 				Type:     schema.TypeString,
@@ -43,28 +45,26 @@ func resourceUserPassword() *schema.Resource {
 	}
 }
 
-func SetUserPassword(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func SetUserPassword(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	uuid, err := uuid.NewV4()
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	password := uuid.String()
 	pgpKey := d.Get("pgp_key").(string)
-	//lint:ignore SA1019 no replacement in SDK v1; removed only in SDK v2
 	encryptionKey, err := encryption.RetrieveGPGKey(pgpKey)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
-	//lint:ignore SA1019 no replacement in SDK v1; removed only in SDK v2
 	fingerprint, encrypted, err := encryption.EncryptValue(encryptionKey, password, "MySQL Password")
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	d.Set("key_fingerprint", fingerprint)
 	d.Set("encrypted_password", encrypted)
@@ -72,7 +72,7 @@ func SetUserPassword(d *schema.ResourceData, meta interface{}) error {
 	requiredVersion, _ := version.NewVersion("8.0.0")
 	currentVersion, err := serverVersion(db)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	passSQL := fmt.Sprintf("'%s'", password)
@@ -85,9 +85,9 @@ func SetUserPassword(d *schema.ResourceData, meta interface{}) error {
 		d.Get("host").(string),
 		passSQL)
 
-	_, err = db.Exec(sql)
+	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 	user := fmt.Sprintf("%s@%s",
 		d.Get("user").(string),
@@ -96,12 +96,12 @@ func SetUserPassword(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func ReadUserPassword(d *schema.ResourceData, meta interface{}) error {
+func ReadUserPassword(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	// This is obviously not possible.
 	return nil
 }
 
-func DeleteUserPassword(d *schema.ResourceData, meta interface{}) error {
+func DeleteUserPassword(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	// We don't need to do anything on the MySQL side here. Just need TF
 	// to remove from the state file.
 	return nil

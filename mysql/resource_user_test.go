@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -8,15 +9,15 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccUser_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_basic,
@@ -57,7 +58,7 @@ func TestAccUser_auth(t *testing.T) {
 		PreCheck: func() {
 			testAccPreCheck(t)
 			// The mysql_no_login plugin ships with the server but is not loaded by default.
-			db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+			db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,8 +69,8 @@ func TestAccUser_auth(t *testing.T) {
 				}
 			}
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_auth_iam_plugin,
@@ -86,9 +87,9 @@ func TestAccUser_auth(t *testing.T) {
 
 func TestAccUser_deprecated(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_deprecated,
@@ -123,7 +124,7 @@ func testAccUserExists(rn string) resource.TestCheckFunc {
 			return fmt.Errorf("user id not set")
 		}
 
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
@@ -154,7 +155,7 @@ func testAccUserAuthExists(rn string) resource.TestCheckFunc {
 			return fmt.Errorf("user id not set")
 		}
 
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
@@ -175,7 +176,7 @@ func testAccUserAuthExists(rn string) resource.TestCheckFunc {
 }
 
 func testAccUserCheckDestroy(s *terraform.State) error {
-	db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+	db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 	if err != nil {
 		return err
 	}

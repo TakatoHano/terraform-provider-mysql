@@ -16,10 +16,10 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
 	"golang.org/x/net/proxy"
 )
@@ -38,7 +38,7 @@ type MySQLConfiguration struct {
 	db *sql.DB
 }
 
-func Provider() terraform.ResourceProvider {
+func Provider() *schema.Provider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
 			"endpoint": {
@@ -183,11 +183,11 @@ func Provider() terraform.ResourceProvider {
 			"mysql_user_password": resourceUserPassword(),
 		},
 
-		ConfigureFunc: providerConfigure,
+		ConfigureContextFunc: providerConfigure,
 	}
 }
 
-func providerConfigure(d *schema.ResourceData) (interface{}, error) {
+func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 
 	var endpoint = d.Get("endpoint").(string)
 
@@ -208,7 +208,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 
 	dialer, err := makeDialer(d)
 	if err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 
 	mysql.RegisterDialContext("tcp", func(ctx context.Context, addr string) (net.Conn, error) {
@@ -220,28 +220,28 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 
 	sessionConf, pfConfMap, err := port_forward.ParseSessionConfig(d)
 	if err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 	if pfConfMap == nil {
 		pfConfMap, err = port_forward.ParsePFConfigMap(d)
 		if err != nil {
-			return nil, err
+			return nil, diag.FromErr(err)
 		}
 	}
 	var lp uint16
 	if pfConfMap != nil {
 		lp, err = localPortFromEndpoint(endpoint)
 		if err != nil {
-			return nil, err
+			return nil, diag.FromErr(err)
 		}
 	}
 	pfConf, err := port_forward.ParsePFConfig(pfConfMap, lp)
 	if err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 
 	if err := port_forward.Connect(sessionConf, pfConf); err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 
 	return &MySQLConfiguration{
@@ -311,7 +311,7 @@ func serverVersionString(db *sql.DB) (string, error) {
 	return versionString, nil
 }
 
-func connectToMySQL(conf *MySQLConfiguration) (*sql.DB, error) {
+func connectToMySQL(ctx context.Context, conf *MySQLConfiguration) (*sql.DB, error) {
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
 
@@ -326,16 +326,16 @@ func connectToMySQL(conf *MySQLConfiguration) (*sql.DB, error) {
 	// when Terraform thinks it's available and when it is actually available.
 	// This is particularly acute when provisioning a server and then immediately
 	// trying to provision a database on it.
-	retryError := resource.Retry(5*time.Minute, func() *resource.RetryError {
+	retryError := retry.RetryContext(ctx, 5*time.Minute, func() *retry.RetryError {
 		var err error
 		db, err = sql.Open("mysql", dsn)
 		if err != nil {
-			return resource.RetryableError(err)
+			return retry.RetryableError(err)
 		}
 
-		if err = db.Ping(); err != nil {
+		if err = db.PingContext(ctx); err != nil {
 			db.Close()
-			return resource.RetryableError(err)
+			return retry.RetryableError(err)
 		}
 
 		return nil

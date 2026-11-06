@@ -1,14 +1,15 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"testing"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccRole_basic(t *testing.T) {
@@ -18,7 +19,7 @@ func TestAccRole_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+			db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
 				return
 			}
@@ -33,8 +34,8 @@ func TestAccRole_basic(t *testing.T) {
 				t.Skip("Roles require MySQL 8+")
 			}
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccRoleCheckDestroy(roleName),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccRoleCheckDestroy(roleName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRoleConfig_basic(roleName),
@@ -49,7 +50,7 @@ func TestAccRole_basic(t *testing.T) {
 
 func testAccRoleExists(roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
@@ -86,7 +87,7 @@ func testAccGetRoleGrantCount(roleName string, db *sql.DB) (int, error) {
 
 func testAccRoleCheckDestroy(roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
