@@ -10,15 +10,17 @@ import (
 
 func resourceRole() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Creates and manages a role on a MySQL server. Roles require MySQL 8 or above.",
 		CreateContext: CreateRole,
 		ReadContext:   ReadRole,
 		DeleteContext: DeleteRole,
 
 		Schema: map[string]*schema.Schema{
 			"name": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Description: "The name of the role.",
+				Required:    true,
+				ForceNew:    true,
 			},
 		},
 	}

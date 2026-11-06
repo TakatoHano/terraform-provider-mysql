@@ -16,6 +16,7 @@ import (
 
 func resourceUser() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Creates and manages a user on a MySQL server.",
 		CreateContext: CreateUser,
 		UpdateContext: UpdateUser,
 		ReadContext:   ReadUser,
@@ -26,27 +27,31 @@ func resourceUser() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"user": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Description: "The name of the user.",
+				Required:    true,
+				ForceNew:    true,
 			},
 
 			"host": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  "localhost",
+				Type:        schema.TypeString,
+				Description: "The source host of the user. Defaults to \"localhost\".",
+				Optional:    true,
+				ForceNew:    true,
+				Default:     "localhost",
 			},
 
 			"plaintext_password": {
-				Type:      schema.TypeString,
-				Optional:  true,
-				Sensitive: true,
-				StateFunc: hashSum,
+				Type:        schema.TypeString,
+				Description: "The password for the user. This must be provided in plain text, so the data source for it must be secured. An _unsalted_ hash of the provided password is stored in state. Conflicts with `auth_plugin`.",
+				Optional:    true,
+				Sensitive:   true,
+				StateFunc:   hashSum,
 			},
 
 			"password": {
 				Type:          schema.TypeString,
+				Description:   "Deprecated alias of `plaintext_password`, whose value is *stored as plaintext in state*. Prefer to use `plaintext_password` instead, which stores the password as an unsalted hash. Conflicts with `auth_plugin`.",
 				Optional:      true,
 				ConflictsWith: []string{"plaintext_password"},
 				Sensitive:     true,
@@ -55,6 +60,7 @@ func resourceUser() *schema.Resource {
 
 			"auth_plugin": {
 				Type:          schema.TypeString,
+				Description:   "Use an authentication plugin (https://dev.mysql.com/doc/refman/5.7/en/authentication-plugins.html) to authenticate the user instead of using password authentication. Supported values are `AWSAuthenticationPlugin` (IAM authentication with Amazon Aurora) and `mysql_no_login` (the MySQL No-Login Authentication Plugin, which must be active in MySQL). Conflicts with `password` and `plaintext_password`.",
 				Optional:      true,
 				ForceNew:      true,
 				ConflictsWith: []string{"plaintext_password", "password"},
@@ -62,6 +68,7 @@ func resourceUser() *schema.Resource {
 
 			"tls_option": {
 				Type:             schema.TypeString,
+				Description:      "An TLS-Option for the `CREATE USER` or `ALTER USER` statement. The value is suffixed to `REQUIRE`. A value of 'SSL' will generate a `CREATE USER ... REQUIRE SSL` statement. See the MySQL `CREATE USER` documentation (https://dev.mysql.com/doc/refman/5.7/en/create-user.html) for more. Ignored if MySQL version is under 5.7.0. Allowed forms: `NONE`, `SSL`, `X509`, or one or more of `CIPHER '...'`, `ISSUER '...'`, `SUBJECT '...'` joined by `AND`.",
 				Optional:         true,
 				ForceNew:         true,
 				Default:          "NONE",
