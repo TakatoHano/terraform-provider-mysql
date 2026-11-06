@@ -37,3 +37,41 @@ jobs:
           install-go: false
       - name: Unit tests
         run: go test ./... -race -timeout 120s
+
+  acceptance:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ["mysql:8.0", "mysql:8.4"]
+    services:
+      mysql:
+        image: ${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - "3306:3306"
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: Acceptance tests
+        env:
+          TF_ACC: "1"
+          MYSQL_ENDPOINT: 127.0.0.1:3306
+          MYSQL_USERNAME: root
+          MYSQL_PASSWORD: root
+        run: go test ./mysql -run 'TestAcc' -v -timeout 20m
