@@ -238,3 +238,25 @@ jobs:
       - name: sshd logs
         if: failure()
         run: docker logs sshd
+
+  # Single aggregate check for branch protection: skipped jobs count as passing,
+  # failed or cancelled jobs fail it. Matrix job names are not usable as
+  # required checks when the job is skipped, so require only `ci`.
+  ci:
+    needs: [changes, test, docs, acceptance, tunnel]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Evaluate job results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$NEEDS" | jq -e 'to_entries | any(.value.result == "failure" or .value.result == "cancelled")' >/dev/null; then
+            echo "One or more jobs failed or were cancelled" >&2
+            exit 1
+          fi
+          echo "All jobs succeeded or were skipped"
