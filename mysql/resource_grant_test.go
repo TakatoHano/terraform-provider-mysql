@@ -54,6 +54,113 @@ func TestAccGrant(t *testing.T) {
 	})
 }
 
+func TestAccGrant_drift(t *testing.T) {
+	dbName := fmt.Sprintf("tf-drift-%d", rand.Intn(100))
+	user := fmt.Sprintf("jdoe-%s", dbName)
+	config := testAccGrantConfig_drift(dbName)
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilegeExists("mysql_grant.test", "INSERT"),
+					resource.TestCheckResourceAttr("mysql_grant.test", "privileges.#", "2"),
+				),
+			},
+			{
+				ResourceName:            "mysql_grant.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"tls_option"},
+			},
+			{
+				// Revoke a privilege behind Terraform's back: the plan must notice.
+				PreConfig: func() {
+					db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
+					if err != nil {
+						t.Fatal(err)
+					}
+					stmt := fmt.Sprintf("REVOKE INSERT ON %s.* FROM %s", quoteIdentifier(dbName), userHostLiteral(user, "example.com"))
+					if _, err := db.Exec(stmt); err != nil {
+						t.Fatalf("%s: %s", stmt, err)
+					}
+				},
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				// Applying replaces the grant and restores the privilege.
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilegeExists("mysql_grant.test", "INSERT"),
+					resource.TestCheckResourceAttr("mysql_grant.test", "privileges.#", "2"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccGrant_allPrivileges(t *testing.T) {
+	dbName := fmt.Sprintf("tf-all-%d", rand.Intn(100))
+	config := fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user = "jdoe-%s"
+  host = "example.com"
+}
+
+resource "mysql_grant" "test" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  database   = mysql_database.test.name
+  privileges = ["ALL"]
+}
+`, dbName, dbName)
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  testAccPrivilegeExists("mysql_grant.test", "ALL PRIVILEGES"),
+			},
+			{
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+func testAccGrantConfig_drift(dbName string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user = "jdoe-%s"
+  host = "example.com"
+}
+
+resource "mysql_grant" "test" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  database   = mysql_database.test.name
+  privileges = ["SELECT", "INSERT"]
+}
+`, dbName, dbName)
+}
+
 func TestAccGrant_specialChars(t *testing.T) {
 	dbName := "tf-acc-quote"
 	user := "tf-acc-quote-user"

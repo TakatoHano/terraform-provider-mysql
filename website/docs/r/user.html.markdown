@@ -85,4 +85,8 @@ Users can be imported using user and host e.g.
 $ terraform import mysql_user.jdoe jdoe@example.com
 ```
 
+The import reads `tls_option` from `mysql.user` (`ssl_type`, `ssl_cipher`, `x509_issuer`, `x509_subject`): no requirement becomes `NONE`, `ANY` becomes `SSL`, `X509` stays `X509`, and specified requirements become `CIPHER '...' AND ISSUER '...' AND SUBJECT '...'` (only the parts that are set). If a value cannot be represented (for example it contains a quote), `tls_option` is left unset and a warning is logged. `tls_option` is refreshed on every read, and values that only differ in case, spacing or clause order (`ssl` vs `SSL`) do not produce a diff.
+
+`auth_plugin` is imported only when the account uses `AWSAuthenticationPlugin` or `mysql_no_login`; for any other plugin it is left unset.
+
 ~> **Caution:** User's password can't be imported.

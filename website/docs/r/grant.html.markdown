@@ -85,12 +85,24 @@ The following arguments are supported:
 
 No further attributes are exported.
 
+## Drift Detection
+
+On every refresh the provider runs `SHOW GRANTS` for the user or role and compares the result with the configuration. `privileges` (or `roles`) and `grant` are read back, so a privilege that was added or revoked outside Terraform is detected.
+
+~> **Note:** `privileges`, `roles` and `grant` cannot be changed in place. Detected drift therefore plans a **replacement** of the grant (revoke, then grant again). If the user or role no longer has any grant on the configured `database` and `table`, the resource is removed from state and planned for creation.
+
+* `ALL` and `ALL PRIVILEGES` are equivalent; MySQL always reports `ALL PRIVILEGES`, and existing configurations that use `ALL` keep a clean plan. Privilege names are compared case-insensitively.
+* Because the privileges of a `database`/`table` pair are read back as a whole, do not declare two `mysql_grant` resources for the same user (or role), database and table; each would see the other's privileges as drift.
+* For `roles`, only the configured roles are checked: roles granted to the user by other means are ignored, and configured roles that are no longer granted are reported as drift.
+* On MySQL 8, `ALL` on `*.*` is listed by the server as every individual privilege; the provider treats that as `ALL PRIVILEGES`.
+
 ## Import
 
-User's privileges can be imported using user, host, and database e.g.
+Privileges can be imported using user, host, and database, or role and database, e.g.
 
 ```
 $ terraform import mysql_grant.jdoe jdoe@example.com:app
+$ terraform import mysql_grant.developer developer:app
 ```
 
-~> **Caution:** Currently, the only privileges that can be imported are for users, and those for roles are not yet supported.
+The import reads `table`, `privileges` and `grant` (`WITH GRANT OPTION`) from `SHOW GRANTS`. If the grantee has several table-level grants on the database, the database-wide one (`table = "*"`) is preferred. If the user has no privileges on the database but has been granted roles (MySQL 8), those roles are imported into `roles` instead. Role names that contain `@` cannot be imported.
