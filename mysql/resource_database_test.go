@@ -99,6 +99,9 @@ func testAccDatabaseCheck_full(rn string, name string, charset string, collation
 			return fmt.Errorf("error reading database: %s", err)
 		}
 
+		// MySQL 8.0.30+ reports the utf8 alias as utf8mb3.
+		createSQL = strings.ReplaceAll(createSQL, "utf8mb3", "utf8")
+
 		if !strings.Contains(createSQL, fmt.Sprintf("CHARACTER SET %s", charset)) {
 			return fmt.Errorf("database default charset isn't %s", charset)
 		}

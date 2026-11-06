@@ -35,15 +35,31 @@ func resourceDatabase() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "utf8",
+
+				DiffSuppressFunc: suppressUTF8Alias,
 			},
 
 			"default_collation": {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "utf8_general_ci",
+
+				DiffSuppressFunc: suppressUTF8Alias,
 			},
 		},
 	}
+}
+
+// suppressUTF8Alias treats utf8 and utf8mb3 (and their collations) as equal:
+// MySQL 8.0.30+ reports the legacy "utf8" alias as "utf8mb3".
+func suppressUTF8Alias(k, old, new string, d *schema.ResourceData) bool {
+	norm := func(v string) string {
+		if strings.HasPrefix(v, "utf8mb3") {
+			return "utf8" + strings.TrimPrefix(v, "utf8mb3")
+		}
+		return v
+	}
+	return norm(old) == norm(new)
 }
 
 func CreateDatabase(d *schema.ResourceData, meta interface{}) error {
