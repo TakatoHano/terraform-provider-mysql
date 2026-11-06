@@ -373,19 +373,28 @@ func normalizeGrantTable(table string) string {
 	return table
 }
 
-// findGrantEntry returns the privilege entry matching database and table.
+// findGrantEntry returns the privileges on database and table. MySQL 8 may
+// split one target over several lines (static privileges, then dynamic ones
+// such as APPLICATION_PASSWORD_ADMIN), so all matching lines are merged.
 func findGrantEntry(entries []grantEntry, database, table string) (grantEntry, bool) {
 	database = unwrapBackticks(database)
 	table = normalizeGrantTable(table)
+	var merged grantEntry
+	found := false
 	for _, e := range entries {
 		if len(e.Roles) > 0 {
 			continue
 		}
 		if e.Database == database && normalizeGrantTable(e.Table) == table {
-			return e, true
+			if !found {
+				merged = grantEntry{Database: e.Database, Table: e.Table}
+				found = true
+			}
+			merged.Privileges = append(merged.Privileges, e.Privileges...)
+			merged.GrantOption = merged.GrantOption || e.GrantOption
 		}
 	}
-	return grantEntry{}, false
+	return merged, found
 }
 
 // isImpliedAllPrivileges detects the MySQL 8 behaviour of listing every static

@@ -104,6 +104,59 @@ func TestAccGrant_drift(t *testing.T) {
 	})
 }
 
+func TestAccGrant_allGlobal(t *testing.T) {
+	user := "jdoe-all-global"
+	config := fmt.Sprintf(`
+resource "mysql_user" "test" {
+  user = %q
+  host = "example.com"
+}
+
+resource "mysql_grant" "test" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  database   = "*"
+  table      = "*"
+  privileges = ["ALL"]
+}
+`, user)
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  testAccPrivilegeExists("mysql_grant.test", "INSERT"),
+			},
+			{
+				Config:   config,
+				PlanOnly: true,
+			},
+			{
+				PreConfig: func() {
+					db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
+					if err != nil {
+						t.Fatal(err)
+					}
+					stmt := "REVOKE INSERT ON *.* FROM " + userHostLiteral(user, "example.com")
+					if _, err := db.Exec(stmt); err != nil {
+						t.Fatalf("%s: %s", stmt, err)
+					}
+				},
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				// Replace the drifted grant so that destroy works cleanly.
+				Config: config,
+				Check:  testAccPrivilegeExists("mysql_grant.test", "INSERT"),
+			},
+		},
+	})
+}
+
 func TestAccGrant_allPrivileges(t *testing.T) {
 	dbName := fmt.Sprintf("tf-all-%d", rand.Intn(100))
 	config := fmt.Sprintf(`

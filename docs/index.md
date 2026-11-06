@@ -140,6 +140,8 @@ provider "mysql" {
 
 See [Setting up Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started.html) for the AWS side of the setup.
 
+~> **Note:** The SSH tunnel, the `session-manager-plugin` process and the SSM session are closed when the provider exits. An `aws_profile` that does not exist in the shared AWS config is an error.
+
 ~> **Note:** The local port forward listener binds to `127.0.0.1` only, so it is not reachable from other hosts.
 
 ## Port forward through public bastion

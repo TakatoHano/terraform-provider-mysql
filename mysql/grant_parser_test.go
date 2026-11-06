@@ -153,6 +153,18 @@ func TestFindGrantEntry(t *testing.T) {
 	}
 }
 
+func TestFindGrantEntry_mergesDynamicLine(t *testing.T) {
+	entries := parseShowGrants([]string{
+		"GRANT SELECT, INSERT ON *.* TO `u`@`h`",
+		"GRANT APPLICATION_PASSWORD_ADMIN, XA_RECOVER_ADMIN ON *.* TO `u`@`h` WITH GRANT OPTION",
+	})
+	e, ok := findGrantEntry(entries, "*", "*")
+	want := []string{"SELECT", "INSERT", "APPLICATION_PASSWORD_ADMIN", "XA_RECOVER_ADMIN"}
+	if !ok || !reflect.DeepEqual(e.Privileges, want) || !e.GrantOption {
+		t.Errorf("got %#v, %v", e, ok)
+	}
+}
+
 func TestNormalizePrivilege(t *testing.T) {
 	cases := map[string]string{
 		"select":               "SELECT",

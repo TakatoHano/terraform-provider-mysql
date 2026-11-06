@@ -1,6 +1,7 @@
 package port_forward
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,28 +11,21 @@ import (
 	"sync"
 	"testing"
 
-	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
-	"github.com/aws/aws-sdk-go/aws"
-	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
-	"github.com/aws/aws-sdk-go/aws/session"
-	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
-	"github.com/aws/aws-sdk-go/service/ssm"
-	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // mockSSM implements only the SSM calls used by session_manager.go.
 type mockSSM struct {
-	ssmiface.SSMAPI
-
 	mu          sync.Mutex
 	startErr    error
 	startInputs []*ssm.StartSessionInput
 	terminated  []string
 }
 
-func (m *mockSSM) StartSession(in *ssm.StartSessionInput) (*ssm.StartSessionOutput, error) {
+func (m *mockSSM) StartSession(_ context.Context, in *ssm.StartSessionInput, _ ...func(*ssm.Options)) (*ssm.StartSessionOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.startInputs = append(m.startInputs, in)
@@ -45,10 +39,10 @@ func (m *mockSSM) StartSession(in *ssm.StartSessionInput) (*ssm.StartSessionOutp
 	}, nil
 }
 
-func (m *mockSSM) TerminateSession(in *ssm.TerminateSessionInput) (*ssm.TerminateSessionOutput, error) {
+func (m *mockSSM) TerminateSession(_ context.Context, in *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.terminated = append(m.terminated, aws.StringValue(in.SessionId))
+	m.terminated = append(m.terminated, aws.ToString(in.SessionId))
 	return &ssm.TerminateSessionOutput{SessionId: in.SessionId}, nil
 }
 
@@ -104,6 +98,8 @@ func setupOfflineEnv(t *testing.T) string {
 	t.Setenv("AWS_REGION", "us-east-1")
 	t.Setenv("AWS_PROFILE", "")
 	t.Setenv("AWS_DEFAULT_PROFILE", "")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(home, ".aws", "config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(home, ".aws", "credentials"))
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
@@ -129,6 +125,15 @@ func TestParseSessionConfig(t *testing.T) {
 	})
 
 	t.Run("defaults", func(t *testing.T) {
+		// v2 requires a named profile to exist in the shared config.
+		awsConfigPath := filepath.Join(home, ".aws", "config")
+		if err := os.MkdirAll(filepath.Dir(awsConfigPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("AWS_CONFIG_FILE", awsConfigPath)
+		if err := os.WriteFile(awsConfigPath, []byte("[profile prof]\nregion = us-east-1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		d := schema.TestResourceDataRaw(t, res.Schema, map[string]interface{}{
 			key: []interface{}{map[string]interface{}{
 				"ec2_instance_id": "i-0123",
@@ -140,7 +145,7 @@ func TestParseSessionConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sc.instanceID != "i-0123" || sc.profile != "prof" || sc.session == nil {
+		if sc.instanceID != "i-0123" || sc.profile != "prof" || sc.awsConfig == nil {
 			t.Fatalf("unexpected sessionConfig: %+v", sc)
 		}
 		if pf["remote_endpoint"] != "i-0123:22" {
@@ -171,7 +176,7 @@ func TestParseSessionConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := aws.StringValue(sc.session.Config.Region); got != "ap-northeast-1" {
+		if got := sc.awsConfig.Region; got != "ap-northeast-1" {
 			t.Errorf("region = %q", got)
 		}
 		if pf["ssh_user"] != "ec2-user" || pf["ssh_key_path"] != "/keys/custom" {
@@ -197,13 +202,13 @@ func TestParseSessionConfig(t *testing.T) {
 }
 
 func TestSessionConfigValidate(t *testing.T) {
-	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")}))
+	sess := &aws.Config{Region: "us-east-1"}
 
-	if err := (&sessionConfig{instanceID: "i-1", session: sess}).validate(); err != nil {
+	if err := (&sessionConfig{instanceID: "i-1", awsConfig: sess}).validate(); err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
 
-	err := (&sessionConfig{session: sess}).validate()
+	err := (&sessionConfig{awsConfig: sess}).validate()
 	if err == nil || !strings.Contains(err.Error(), "not set ec2_instance_id") {
 		t.Errorf("empty instanceID: %v", err)
 	}
@@ -250,7 +255,7 @@ func TestGetAWSProfile(t *testing.T) {
 func TestSessionManagerPlugin(t *testing.T) {
 	in := &ssm.StartSessionInput{
 		DocumentName: aws.String("AWS-StartSSHSession"),
-		Parameters:   map[string][]*string{"portNumber": {aws.String("22")}},
+		Parameters:   map[string][]string{"portNumber": {"22"}},
 		Target:       aws.String("i-0123"),
 	}
 	out := &ssm.StartSessionOutput{
@@ -281,14 +286,14 @@ func TestSessionManagerPlugin(t *testing.T) {
 		if err := json.Unmarshal([]byte(cmd.Args[1]), &gotOut); err != nil {
 			t.Fatal(err)
 		}
-		if aws.StringValue(gotOut.SessionId) != "sess-123" || aws.StringValue(gotOut.TokenValue) != "token-abc" {
+		if aws.ToString(gotOut.SessionId) != "sess-123" || aws.ToString(gotOut.TokenValue) != "token-abc" {
 			t.Errorf("output did not round-trip: %+v", gotOut)
 		}
 		var gotIn ssm.StartSessionInput
 		if err := json.Unmarshal([]byte(cmd.Args[5]), &gotIn); err != nil {
 			t.Fatal(err)
 		}
-		if aws.StringValue(gotIn.Target) != "i-0123" || aws.StringValue(gotIn.DocumentName) != "AWS-StartSSHSession" {
+		if aws.ToString(gotIn.Target) != "i-0123" || aws.ToString(gotIn.DocumentName) != "AWS-StartSSHSession" {
 			t.Errorf("input did not round-trip: %+v", gotIn)
 		}
 	})
@@ -311,15 +316,15 @@ func TestOpenSession(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		m := &mockSSM{}
-		cmd, closeFn, err := openSession(m, "i-0123", "myprofile", "ap-northeast-1", endpoint)
+		cmd, closeFn, err := openSession(context.Background(), m, "i-0123", "myprofile", "ap-northeast-1", endpoint)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if cmd == nil || closeFn == nil {
 			t.Fatal("want non-nil cmd and close func")
 		}
-		if len(m.startInputs) != 1 || aws.StringValue(m.startInputs[0].Target) != "i-0123" ||
-			aws.StringValue(m.startInputs[0].DocumentName) != "AWS-StartSSHSession" {
+		if len(m.startInputs) != 1 || aws.ToString(m.startInputs[0].Target) != "i-0123" ||
+			aws.ToString(m.startInputs[0].DocumentName) != "AWS-StartSSHSession" {
 			t.Errorf("unexpected StartSession input: %+v", m.startInputs)
 		}
 		if got := m.terminateCalls(); len(got) != 0 {
@@ -336,7 +341,7 @@ func TestOpenSession(t *testing.T) {
 	t.Run("start failure", func(t *testing.T) {
 		boom := errors.New("boom")
 		m := &mockSSM{startErr: boom}
-		cmd, closeFn, err := openSession(m, "i-0123", "p", "ap-northeast-1", endpoint)
+		cmd, closeFn, err := openSession(context.Background(), m, "i-0123", "p", "ap-northeast-1", endpoint)
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v", err)
 		}
@@ -352,23 +357,107 @@ func TestOpenSession(t *testing.T) {
 func TestConnectTerminatesSessionOnError(t *testing.T) {
 	m := &mockSSM{}
 	orig := newSSMClient
-	newSSMClient = func(*session.Session) ssmiface.SSMAPI { return m }
+	newSSMClient = func(aws.Config) ssmAPI { return m }
 	t.Cleanup(func() { newSSMClient = orig })
 
 	conf := &sessionConfig{
 		instanceID: "i-0123",
 		profile:    "p",
-		session:    session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")})),
+		awsConfig:  &aws.Config{Region: "us-east-1"},
 	}
 	pf := &portFowardConfig{
 		sshUser: "u",
 		keyPath: filepath.Join(t.TempDir(), "does-not-exist"),
 	}
 
-	if err := conf.connect(pf); err == nil {
-		t.Fatal("want error for missing key file")
+	if tun, err := conf.connect(pf); err == nil || tun != nil {
+		t.Fatal("want error and nil tunnel for missing key file")
 	}
 	if got := m.terminateCalls(); len(got) != 1 || got[0] != "sess-123" {
 		t.Errorf("terminate calls = %v, want exactly one for sess-123", got)
+	}
+}
+
+func TestTunnelCloseTerminatesSessionOnce(t *testing.T) {
+	m := &mockSSM{}
+	_, closeFn, err := openSession(context.Background(), m, "i-0123", "p", "us-east-1", "https://ssm.us-east-1.amazonaws.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tun := &Tunnel{closeSession: closeFn}
+	if err := tun.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tun.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.terminateCalls(); len(got) != 1 || got[0] != "sess-123" {
+		t.Errorf("terminate calls = %v, want exactly one", got)
+	}
+}
+
+func TestSSMJSONKeys(t *testing.T) {
+	in := &ssm.StartSessionInput{
+		DocumentName: aws.String("AWS-StartSSHSession"),
+		Parameters:   map[string][]string{"portNumber": {"22"}},
+		Target:       aws.String("i-0123"),
+	}
+	out := &ssm.StartSessionOutput{
+		SessionId:  aws.String("s"),
+		TokenValue: aws.String("t"),
+		StreamUrl:  aws.String("u"),
+	}
+	for _, c := range []struct {
+		v    interface{}
+		keys []string
+	}{
+		{in, []string{"Target", "DocumentName", "Parameters"}},
+		{out, []string{"SessionId", "TokenValue", "StreamUrl"}},
+	} {
+		b, err := json.Marshal(c.v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range c.keys {
+			if _, ok := m[k]; !ok {
+				t.Errorf("%T JSON %s lacks key %q", c.v, b, k)
+			}
+		}
+	}
+	b, _ := json.Marshal(in)
+	if !strings.Contains(string(b), `"Parameters":{"portNumber":["22"]}`) {
+		t.Errorf("unexpected Parameters encoding: %s", b)
+	}
+}
+
+func TestResolveSSMEndpoint(t *testing.T) {
+	got, err := resolveSSMEndpoint(context.Background(), aws.Config{Region: "ap-northeast-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://ssm.ap-northeast-1.amazonaws.com" {
+		t.Errorf("endpoint = %q", got)
+	}
+	got, err = resolveSSMEndpoint(context.Background(), aws.Config{Region: "us-east-1", BaseEndpoint: aws.String("https://ssm.internal.example")})
+	if err != nil || got != "https://ssm.internal.example" {
+		t.Errorf("custom endpoint = %q, %v", got, err)
+	}
+}
+
+func TestParseSessionConfigUnknownProfile(t *testing.T) {
+	setupOfflineEnv(t)
+	d := schema.TestResourceDataRaw(t, ssmConfigResource().Schema, map[string]interface{}{
+		"aws_ssm_session_manager_client_config": []interface{}{map[string]interface{}{
+			"ec2_instance_id": "i-0123",
+			"rds_endpoint":    "db.example:3306",
+			"aws_profile":     "no-such-profile",
+		}},
+	})
+	if _, _, err := ParseSessionConfig(d); err == nil {
+		t.Fatal("want error for unknown profile")
 	}
 }

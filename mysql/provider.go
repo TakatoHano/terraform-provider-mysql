@@ -13,6 +13,7 @@ import (
 
 	"github.com/TakatoHano/terraform-provider-mysql/mysql/port_forward"
 	"github.com/go-sql-driver/mysql"
+	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/go-version"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -33,8 +34,50 @@ type MySQLConfiguration struct {
 	MaxConnLifetime time.Duration
 	MaxOpenConns    int
 
-	mu sync.Mutex
-	db *sql.DB
+	mu     sync.Mutex
+	db     *sql.DB
+	tunnel *port_forward.Tunnel
+}
+
+var (
+	activeConfigsMu sync.Mutex
+	activeConfigs   []*MySQLConfiguration
+)
+
+// Close closes the cached database handle (if any) and the port-forward
+// tunnel (if any). It is safe to call more than once.
+func (c *MySQLConfiguration) Close() error {
+	var errs error
+	c.mu.Lock()
+	db := c.db
+	c.db = nil
+	c.mu.Unlock()
+	if db != nil {
+		if err := db.Close(); err != nil {
+			errs = multierror.Append(errs, err)
+		}
+	}
+	if err := c.tunnel.Close(); err != nil {
+		errs = multierror.Append(errs, err)
+	}
+	return errs
+}
+
+// Cleanup closes every configuration created by providerConfigure. It is
+// meant to run after plugin.Serve returns.
+func Cleanup() error {
+	activeConfigsMu.Lock()
+	configs := activeConfigs
+	activeConfigs = nil
+	activeConfigsMu.Unlock()
+
+	var errs error
+	for _, c := range configs {
+		if err := c.Close(); err != nil {
+			errs = multierror.Append(errs, err)
+		}
+	}
+	return errs
 }
 
 func Provider() *schema.Provider {
@@ -257,15 +300,22 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		return nil, diag.FromErr(err)
 	}
 
-	if err := port_forward.Connect(sessionConf, pfConf); err != nil {
+	tunnel, err := port_forward.Connect(sessionConf, pfConf)
+	if err != nil {
 		return nil, diag.FromErr(err)
 	}
 
-	return &MySQLConfiguration{
+	mc := &MySQLConfiguration{
 		Config:          &conf,
 		MaxConnLifetime: time.Duration(d.Get("max_conn_lifetime_sec").(int)) * time.Second,
 		MaxOpenConns:    d.Get("max_open_conns").(int),
-	}, nil
+		tunnel:          tunnel,
+	}
+	activeConfigsMu.Lock()
+	activeConfigs = append(activeConfigs, mc)
+	activeConfigsMu.Unlock()
+
+	return mc, nil
 }
 
 // localPortFromEndpoint extracts the local port from a host:port endpoint.
