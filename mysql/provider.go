@@ -37,6 +37,9 @@ type MySQLConfiguration struct {
 	mu     sync.Mutex
 	db     *sql.DB
 	tunnel *port_forward.Tunnel
+	// tunnelKey identifies the tunnel's settings so a later providerConfigure
+	// call with the same settings can reuse it. Empty when there is no tunnel.
+	tunnelKey string
 }
 
 var (
@@ -212,7 +215,7 @@ func Provider() *schema.Provider {
 					Schema: map[string]*schema.Schema{
 						"remote_host": {
 							Type:        schema.TypeString,
-							Description: "The IP or host of public bastion server can connect the DB server to use.",
+							Description: "The IP or host of public bastion server can connect the DB server to use. May include a port as `host:port`; defaults to port 22.",
 							Required:    true,
 						},
 						"db_endpoint": {
@@ -300,12 +303,34 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		return nil, diag.FromErr(err)
 	}
 
-	tunnel, err := port_forward.Connect(sessionConf, pfConf)
-	if err != nil {
-		return nil, diag.FromErr(err)
+	// providerConfigure runs once per Terraform operation (and per acceptance
+	// test step) in the same process. Reuse a tunnel already listening on the
+	// same local port with the same settings instead of failing with
+	// "address already in use".
+	var tunnelKey string
+	if pfConf != nil {
+		tunnelKey = fmt.Sprintf("%d|%v", lp, pfConfMap)
+	}
+	var tunnel *port_forward.Tunnel
+	if tunnelKey != "" {
+		activeConfigsMu.Lock()
+		for _, ac := range activeConfigs {
+			if ac.tunnelKey == tunnelKey {
+				tunnel = ac.tunnel
+				break
+			}
+		}
+		activeConfigsMu.Unlock()
+	}
+	if tunnel == nil {
+		tunnel, err = port_forward.Connect(sessionConf, pfConf)
+		if err != nil {
+			return nil, diag.FromErr(err)
+		}
 	}
 
 	mc := &MySQLConfiguration{
+		tunnelKey:       tunnelKey,
 		Config:          &conf,
 		MaxConnLifetime: time.Duration(d.Get("max_conn_lifetime_sec").(int)) * time.Second,
 		MaxOpenConns:    d.Get("max_open_conns").(int),

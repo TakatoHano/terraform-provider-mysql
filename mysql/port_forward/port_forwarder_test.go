@@ -384,3 +384,34 @@ func TestPortForwardEndToEnd(t *testing.T) {
 		t.Error("ssh client still usable after Close")
 	}
 }
+
+func TestWithDefaultSSHPort(t *testing.T) {
+	for in, want := range map[string]string{
+		"bastion.example.com":      "bastion.example.com:22",
+		"bastion.example.com:2222": "bastion.example.com:2222",
+		"10.0.0.1":                 "10.0.0.1:22",
+		"127.0.0.1:2222":           "127.0.0.1:2222",
+		"::1":                      "[::1]:22",
+		"[::1]":                    "[::1]:22",
+		"[::1]:2200":               "[::1]:2200",
+	} {
+		if got := withDefaultSSHPort(in); got != want {
+			t.Errorf("withDefaultSSHPort(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCreateHostKeyCallbackCreatesKnownHosts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, err := createHostKeyCallback(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(home, ".ssh"))
+	if err != nil || !st.IsDir() {
+		t.Fatalf("~/.ssh not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "known_hosts")); err != nil {
+		t.Fatalf("known_hosts not created: %v", err)
+	}
+}
