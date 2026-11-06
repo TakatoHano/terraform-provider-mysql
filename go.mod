@@ -138,4 +138,4 @@ require (
 go 1.26.10
 
 // terraform-plugin-sdk v1 is incompatible with afero >= 1.3 (snapshotFS lacks Chown); pinned until the SDK v2 migration.
-replace github.com/spf13/afero => github.com/spf13/afero v1.2.2
+replace github.com/spf13/afero => github.com/spf13/afero v1.15.0
