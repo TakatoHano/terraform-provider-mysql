@@ -51,6 +51,8 @@ The recommended `mode = "port_forwarding"` uses the SSM document
 the instance and no `ssh_user`/`ssh_key_path`. `rds_endpoint` may be given as
 `host` (port 3306 is assumed) or `host:port`.
 
+~> **Note:** `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues. The default `ssh` mode is the long-standing, production-tested path.
+
 {{ tffile "examples/provider/ssm_port_forward.tf" }}
 
 ~> **Caution:** [Session Manager Plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) is required to be installed.

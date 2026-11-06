@@ -37,6 +37,8 @@ provider "mysql" {
 }
 ```
 
+Note: `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues. The default `ssh` mode is the long-standing, production-tested path.
+
 The default `mode = "ssh"` (SSH over SSM, needs `ssh_user`/`ssh_key_path`) is
 kept for compatibility; a future major version may change the default to
 `port_forwarding`. See the provider docs for the required IAM permissions.
