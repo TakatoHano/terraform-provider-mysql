@@ -61,11 +61,12 @@ func resourceUser() *schema.Resource {
 			},
 
 			"tls_option": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ForceNew:     true,
-				Default:      "NONE",
-				ValidateFunc: validateTLSOption,
+				Type:             schema.TypeString,
+				Optional:         true,
+				ForceNew:         true,
+				Default:          "NONE",
+				ValidateFunc:     validateTLSOption,
+				DiffSuppressFunc: suppressEquivalentTLSOption,
 			},
 		},
 	}
@@ -212,14 +213,26 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	var exists int
-	err = db.QueryRowContext(ctx, "SELECT 1 FROM mysql.user WHERE user = ? AND host = ?",
-		d.Get("user").(string), d.Get("host").(string)).Scan(&exists)
+	info, err := queryUserTLSAuth(ctx, db, d.Get("user").(string), d.Get("host").(string))
 	if errors.Is(err, sql.ErrNoRows) {
 		d.SetId("")
 		return nil
 	}
-	return diag.FromErr(err)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	// Refresh tls_option, but keep an equivalent spelling from the config.
+	if tls, ok := info.tlsOption(); ok {
+		current, _ := d.Get("tls_option").(string)
+		if canonicalTLSOption(current) != canonicalTLSOption(tls) {
+			if err := d.Set("tls_option", tls); err != nil {
+				return diag.FromErr(err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func DeleteUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -256,21 +269,36 @@ func ImportUser(ctx context.Context, d *schema.ResourceData, meta interface{}) (
 		return nil, err
 	}
 
-	var count int
-	err = db.QueryRowContext(ctx, "SELECT COUNT(1) FROM mysql.user WHERE user = ? AND host = ?", user, host).Scan(&count)
-
+	info, err := queryUserTLSAuth(ctx, db, user, host)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("user %s, host %s not found", user, host)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	if count == 0 {
-		return nil, fmt.Errorf("user %s, host %s not found", user, host)
+	if err := d.Set("user", user); err != nil {
+		return nil, err
+	}
+	if err := d.Set("host", host); err != nil {
+		return nil, err
 	}
 
-	d.Set("user", user)
-	d.Set("host", host)
-	// importing tls_option is complicated
-	d.Set("tls_option", "NONE")
+	if tls, ok := info.tlsOption(); ok {
+		if err := d.Set("tls_option", tls); err != nil {
+			return nil, err
+		}
+	} else {
+		log.Printf("[WARN] cannot represent the REQUIRE options of %s@%s as tls_option; leaving it unset", user, host)
+	}
+
+	// Only the plugins CreateUser understands can round-trip through auth_plugin.
+	switch info.plugin {
+	case "AWSAuthenticationPlugin", "mysql_no_login":
+		if err := d.Set("auth_plugin", info.plugin); err != nil {
+			return nil, err
+		}
+	}
 
 	return []*schema.ResourceData{d}, nil
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"testing"
 
 	"github.com/go-sql-driver/mysql"
@@ -50,6 +51,48 @@ func TestAccUser_basic(t *testing.T) {
 				),
 			},
 		},
+	})
+}
+
+func TestAccUser_importTLS(t *testing.T) {
+	configs := []struct{ tls, alt string }{
+		{"SSL", "ssl"},
+		{"X509", "x509"},
+		{"ISSUER '/CN=ca' AND SUBJECT '/CN=jdoe'", "subject '/CN=jdoe' and issuer '/CN=ca'"},
+	}
+	var steps []resource.TestStep
+	for _, c := range configs {
+		config := fmt.Sprintf(`
+resource "mysql_user" "test" {
+  user               = "jdoe-tls"
+  host               = "example.com"
+  plaintext_password = "password"
+  tls_option         = %q
+}
+`, c.tls)
+		steps = append(steps,
+			resource.TestStep{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr("mysql_user.test", "tls_option", c.tls),
+			},
+			resource.TestStep{
+				ResourceName:            "mysql_user.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"plaintext_password", "password"},
+			},
+			// Reordered or differently cased clauses must not plan a replacement.
+			resource.TestStep{
+				Config:   strings.Replace(config, c.tls, c.alt, 1),
+				PlanOnly: true,
+			},
+		)
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps:             steps,
 	})
 }
 
@@ -116,6 +159,11 @@ func TestAccUser_auth(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "mysql_no_login"),
 				),
+			},
+			{
+				ResourceName:      "mysql_user.test",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
