@@ -1,4 +1,4 @@
-FROM golang:1.26-bookworm
+FROM golang:1.27-bookworm
 
 RUN apt-get update -qq && \
     apt-get install -y sudo build-essential bash && \
