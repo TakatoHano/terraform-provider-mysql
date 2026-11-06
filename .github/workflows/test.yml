@@ -14,7 +14,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether the change only touches documentation. The heavy jobs are
+  # skipped at job level (not via workflow-level paths-ignore) so that the
+  # required status checks still report "skipped", which counts as passing.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Detect docs-only change
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -u
+          docs_only=false
+          files=""
+          ok=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            files="$(git diff --name-only "origin/${BASE_REF}...HEAD")" || ok=false
+          elif [ "$EVENT_NAME" = "push" ]; then
+            if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              ok=false
+            else
+              files="$(git diff --name-only "$BEFORE_SHA" "$HEAD_SHA")" || ok=false
+            fi
+          else
+            ok=false
+          fi
+
+          echo "Changed files:"
+          echo "$files"
+
+          if [ "$ok" = true ] && [ -n "$files" ]; then
+            docs_only=true
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              case "$f" in
+                docs/*|templates/*|examples/*|README.md|LICENSE|.github/*.md|*.md) ;;
+                *) docs_only=false; echo "Non-docs file: $f"; break ;;
+              esac
+            done <<< "$files"
+          fi
+          echo "docs_only=${docs_only}"
+          echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -62,7 +118,8 @@ jobs:
         run: git diff --exit-code -- docs/
 
   acceptance:
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -101,7 +158,8 @@ jobs:
 
   # End-to-end test of port_forward_client_config against a real sshd and MySQL.
   tunnel:
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
