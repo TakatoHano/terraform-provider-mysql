@@ -118,26 +118,37 @@ func (pfConf *portFowardConfig) validate() error {
 	return nil
 }
 
-func (pfConf *portFowardConfig) Connect() error {
+func (pfConf *portFowardConfig) Connect() (*Tunnel, error) {
 	if pfConf == nil {
-		return nil
+		return nil, nil
 	}
 
 	sshConfig, err := pfConf.CreateSSHClientConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	client, err := pfConf.CreateSSHClient(sshConfig)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if err := pfConf.PortForward(client); err != nil {
-		return err
+	t := &Tunnel{client: client}
+	listener, err := pfConf.PortForward(client)
+	if err != nil {
+		return nil, closeAfter(err, t)
 	}
+	t.listener = listener
 
-	return nil
+	return t, nil
+}
+
+// closeAfter closes t and returns err combined with any close errors.
+func closeAfter(err error, t *Tunnel) error {
+	if cerr := t.Close(); cerr != nil {
+		return multierror.Append(err, cerr)
+	}
+	return err
 }
 
 // currentUsername returns the current OS user name, falling back to $USER.
@@ -261,7 +272,11 @@ func (pfConf *portFowardConfig) CreateSSHClientWithProxyCommand(
 	}
 
 	done := func() error {
-		return proxyCmd.Process.Kill()
+		// The plugin usually exits on its own once the ssh client closes the pipe.
+		if err := proxyCmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+		return nil
 	}
 
 	conn, chans, reqs, err := ssh.NewClientConn(c, pfConf.remoteEndpoint, sshConf)
@@ -275,11 +290,14 @@ func (pfConf *portFowardConfig) CreateSSHClientWithProxyCommand(
 	return client, done, nil
 }
 
-func (pfConf *portFowardConfig) PortForward(sshClient *ssh.Client) error {
+// PortForward starts listening on the local port and forwards every accepted
+// connection to dbEndpoint through sshClient. The accept loop ends when the
+// returned listener is closed.
+func (pfConf *portFowardConfig) PortForward(sshClient *ssh.Client) (net.Listener, error) {
 	// Bind to loopback only so the tunnel is not exposed to the LAN.
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", pfConf.localPort))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	go func() {
@@ -291,6 +309,9 @@ func (pfConf *portFowardConfig) PortForward(sshClient *ssh.Client) error {
 				var ne net.Error
 				if errors.As(err, &ne) && ne.Timeout() {
 					continue
+				}
+				if errors.Is(err, net.ErrClosed) {
+					return
 				}
 				fmt.Fprintln(os.Stderr, "accept failed: ", err)
 				return
@@ -327,5 +348,5 @@ func (pfConf *portFowardConfig) PortForward(sshClient *ssh.Client) error {
 		}
 	}()
 
-	return nil
+	return listener, nil
 }
