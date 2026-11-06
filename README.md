@@ -29,11 +29,17 @@ provider "mysql" {
   password = "${aws_db_instance.db.password}"
   
   aws_ssm_session_manager_client_config {
+    # No SSH keys or sshd needed (AWS-StartPortForwardingSessionToRemoteHost).
+    mode            = "port_forwarding"
     ec2_instance_id = resource.aws_instance.bastion.id
     rds_endpoint    = resource.aws_db_instance.db.endpoint
   }
 }
 ```
+
+The default `mode = "ssh"` (SSH over SSM, needs `ssh_user`/`ssh_key_path`) is
+kept for compatibility; a future major version may change the default to
+`port_forwarding`. See the provider docs for the required IAM permissions.
 
 Or, Port Forwarding through public server
 
