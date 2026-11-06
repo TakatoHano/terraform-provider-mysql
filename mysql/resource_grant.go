@@ -140,7 +140,7 @@ func supportsRoles(db *sql.DB) (bool, error) {
 	}
 
 	requiredVersion, _ := version.NewVersion("8.0.0")
-	hasRoles := currentVersion.GreaterThan(requiredVersion)
+	hasRoles := currentVersion.GreaterThanOrEqual(requiredVersion)
 	return hasRoles, nil
 }
 
@@ -203,7 +203,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		stmtSQL += fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string))
 	}
 
-	if !hasRoles && !isRole && d.Get("grant").(bool) {
+	if !isRole && d.Get("grant").(bool) {
 		stmtSQL += " WITH GRANT OPTION"
 	}
 
