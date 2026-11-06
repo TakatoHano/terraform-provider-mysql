@@ -61,10 +61,11 @@ func resourceUser() *schema.Resource {
 			},
 
 			"tls_option": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  "NONE",
+				Type:         schema.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				Default:      "NONE",
+				ValidateFunc: validateTLSOption,
 			},
 		},
 	}
@@ -91,9 +92,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		}
 	}
 
-	stmtSQL := fmt.Sprintf("CREATE USER '%s'@'%s'",
-		d.Get("user").(string),
-		d.Get("host").(string))
+	stmtSQL := "CREATE USER " + userHostLiteral(d.Get("user").(string), d.Get("host").(string))
 
 	var password string
 	if v, ok := d.GetOk("plaintext_password"); ok {
@@ -109,7 +108,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	if authStm != "" {
 		stmtSQL = stmtSQL + authStm
 	} else {
-		stmtSQL = stmtSQL + fmt.Sprintf(" IDENTIFIED BY '%s'", password)
+		stmtSQL = stmtSQL + " IDENTIFIED BY " + quoteString(password)
 	}
 
 	requiredVersion, _ := version.NewVersion("5.7.0")
@@ -170,15 +169,13 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 		ver, _ := version.NewVersion("5.7.6")
 		if serverVersion.LessThan(ver) {
-			stmtSQL = fmt.Sprintf("SET PASSWORD FOR '%s'@'%s' = PASSWORD('%s')",
-				d.Get("user").(string),
-				d.Get("host").(string),
-				newpw.(string))
+			stmtSQL = fmt.Sprintf("SET PASSWORD FOR %s = PASSWORD(%s)",
+				userHostLiteral(d.Get("user").(string), d.Get("host").(string)),
+				quoteString(newpw.(string)))
 		} else {
-			stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'",
-				d.Get("user").(string),
-				d.Get("host").(string),
-				newpw.(string))
+			stmtSQL = fmt.Sprintf("ALTER USER %s IDENTIFIED BY %s",
+				userHostLiteral(d.Get("user").(string), d.Get("host").(string)),
+				quoteString(newpw.(string)))
 		}
 
 		log.Println("Executing query:", stmtSQL)
@@ -195,10 +192,9 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	if d.HasChange("tls_option") && currentVersion.GreaterThan(requiredVersion) {
-		stmtSQL := fmt.Sprintf("ALTER USER '%s'@'%s'  REQUIRE %s",
-			d.Get("user").(string),
-			d.Get("host").(string),
-			fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string)))
+		stmtSQL := fmt.Sprintf("ALTER USER %s REQUIRE %s",
+			userHostLiteral(d.Get("user").(string), d.Get("host").(string)),
+			d.Get("tls_option").(string))
 
 		log.Println("Executing query:", stmtSQL)
 		_, err := db.ExecContext(ctx, stmtSQL)
@@ -232,9 +228,7 @@ func DeleteUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	stmtSQL := fmt.Sprintf("DROP USER '%s'@'%s'",
-		d.Get("user").(string),
-		d.Get("host").(string))
+	stmtSQL := "DROP USER " + userHostLiteral(d.Get("user").(string), d.Get("host").(string))
 
 	log.Println("Executing statement:", stmtSQL)
 

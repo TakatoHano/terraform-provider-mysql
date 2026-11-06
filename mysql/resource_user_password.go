@@ -75,14 +75,13 @@ func SetUserPassword(ctx context.Context, d *schema.ResourceData, meta interface
 		return diag.FromErr(err)
 	}
 
-	passSQL := fmt.Sprintf("'%s'", password)
+	passSQL := quoteString(password)
 	if currentVersion.LessThan(requiredVersion) {
 		passSQL = fmt.Sprintf("PASSWORD(%s)", passSQL)
 	}
 
-	sql := fmt.Sprintf("SET PASSWORD FOR '%s'@'%s' = %s",
-		d.Get("user").(string),
-		d.Get("host").(string),
+	sql := fmt.Sprintf("SET PASSWORD FOR %s = %s",
+		userHostLiteral(d.Get("user").(string), d.Get("host").(string)),
 		passSQL)
 
 	_, err = db.ExecContext(ctx, sql)

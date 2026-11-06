@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -265,8 +264,6 @@ func localPortFromEndpoint(endpoint string) (uint16, error) {
 	return uint16(p), nil
 }
 
-var identQuoteReplacer = strings.NewReplacer("`", "``")
-
 func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 	proxyFromEnv := proxy.FromEnvironment()
 	proxyArg := d.Get("proxy").(string)
@@ -285,10 +282,6 @@ func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 	}
 
 	return proxyFromEnv, nil
-}
-
-func quoteIdentifier(in string) string {
-	return fmt.Sprintf("`%s`", identQuoteReplacer.Replace(in))
 }
 
 func serverVersion(db *sql.DB) (*version.Version, error) {
