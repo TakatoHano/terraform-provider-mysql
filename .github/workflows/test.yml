@@ -36,4 +36,4 @@ jobs:
           version: "latest"
           install-go: false
       - name: Unit tests
-        run: go test ./... -timeout 120s
+        run: go test ./... -race -timeout 120s
