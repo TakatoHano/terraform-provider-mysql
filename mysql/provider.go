@@ -85,6 +85,7 @@ func Provider() *schema.Provider {
 		Schema: map[string]*schema.Schema{
 			"endpoint": {
 				Type:        schema.TypeString,
+				Description: "The address of the MySQL server to use. Most often a \"hostname:port\" pair, but may also be an absolute path to a Unix socket when the host OS is Unix-compatible. Can also be sourced from the `MYSQL_ENDPOINT` environment variable.",
 				Required:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_ENDPOINT", nil),
 				ValidateFunc: func(v interface{}, k string) (ws []string, errors []error) {
@@ -99,19 +100,22 @@ func Provider() *schema.Provider {
 
 			"username": {
 				Type:        schema.TypeString,
+				Description: "Username to use to authenticate with the server, can also be sourced from the `MYSQL_USERNAME` environment variable.",
 				Required:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_USERNAME", nil),
 			},
 
 			"password": {
 				Type:        schema.TypeString,
+				Description: "Password for the given user, if that user has a password, can also be sourced from the `MYSQL_PASSWORD` environment variable.",
 				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_PASSWORD", nil),
 			},
 
 			"proxy": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Description: "Proxy socks url, can also be sourced from `ALL_PROXY` or `all_proxy` environment variables.",
+				Optional:    true,
 				DefaultFunc: schema.MultiEnvDefaultFunc([]string{
 					"ALL_PROXY",
 					"all_proxy",
@@ -121,6 +125,7 @@ func Provider() *schema.Provider {
 
 			"tls": {
 				Type:        schema.TypeString,
+				Description: "The TLS configuration. One of `false`, `true`, or `skip-verify`. Defaults to `false`. Can also be sourced from the `MYSQL_TLS_CONFIG` environment variable.",
 				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_TLS_CONFIG", "false"),
 				ValidateFunc: validation.StringInSlice([]string{
@@ -131,17 +136,20 @@ func Provider() *schema.Provider {
 			},
 
 			"max_conn_lifetime_sec": {
-				Type:     schema.TypeInt,
-				Optional: true,
+				Type:        schema.TypeInt,
+				Description: "Sets the maximum amount of time a connection may be reused. If d <= 0, connections are reused forever.",
+				Optional:    true,
 			},
 
 			"max_open_conns": {
-				Type:     schema.TypeInt,
-				Optional: true,
+				Type:        schema.TypeInt,
+				Description: "Sets the maximum number of open connections to the database. If n <= 0, then there is no limit on the number of open connections.",
+				Optional:    true,
 			},
 
 			"authentication_plugin": {
 				Type:         schema.TypeString,
+				Description:  "Sets the authentication plugin, it can be one of the following: `native` or `cleartext`. Defaults to `native`.",
 				Optional:     true,
 				Default:      nativePasswords,
 				ValidateFunc: validation.StringInSlice([]string{cleartextPasswords, nativePasswords}, true),
@@ -155,23 +163,28 @@ func Provider() *schema.Provider {
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"ec2_instance_id": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Description: "The EC2 server can connect the RDS to use. If you are managing by Terraform, you can set the value from `aws_instance`'s id.",
+							Required:    true,
 						},
 						"rds_endpoint": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Description: "The endpoint of the RDS to use. If you are managing by Terraform, you can set the value from `aws_db_instance` or `aws_rds_cluster`'s endpoint.",
+							Required:    true,
 						},
 						"ssh_user": {
-							Type:     schema.TypeString,
-							Optional: true,
+							Type:        schema.TypeString,
+							Description: "SSH user name. Defaults to current user name.",
+							Optional:    true,
 						},
 						"ssh_key_path": {
-							Type:     schema.TypeString,
-							Optional: true,
+							Type:        schema.TypeString,
+							Description: "SSH user's private key path. Defaults to `~/.ssh/id_rsa`.",
+							Optional:    true,
 						},
 						"aws_profile": {
-							Type: schema.TypeString,
+							Type:        schema.TypeString,
+							Description: "AWS user's profile (SSO logged in), can also be sourced from the `AWS_PROFILE` or `AWS_DEFAULT_PROFILE` environment variables. If you use AWS credentials, they can also be sourced from the `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY_ID`, and `AWS_SESSION_TOKEN` environment variables.",
 							DefaultFunc: schema.MultiEnvDefaultFunc([]string{
 								"AWS_PROFILE",
 								"AWS_DEFAULT_PROFILE",
@@ -179,7 +192,8 @@ func Provider() *schema.Provider {
 							Optional: true,
 						},
 						"region": {
-							Type: schema.TypeString,
+							Type:        schema.TypeString,
+							Description: "AWS region, can also be sourced from the `AWS_REGION` or `AWS_DEFAULT_REGION` environment variables.",
 							DefaultFunc: schema.MultiEnvDefaultFunc([]string{
 								"AWS_REGION",
 								"AWS_DEFAULT_REGION",
@@ -197,20 +211,24 @@ func Provider() *schema.Provider {
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"remote_host": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Description: "The IP or host of public bastion server can connect the DB server to use.",
+							Required:    true,
 						},
 						"db_endpoint": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Description: "The endpoint of the DB server to use.",
+							Required:    true,
 						},
 						"ssh_user": {
-							Type:     schema.TypeString,
-							Optional: true,
+							Type:        schema.TypeString,
+							Description: "SSH user name. Defaults to current user name.",
+							Optional:    true,
 						},
 						"ssh_key_path": {
-							Type:     schema.TypeString,
-							Optional: true,
+							Type:        schema.TypeString,
+							Description: "SSH user's private key path. Defaults to `~/.ssh/id_rsa`.",
+							Optional:    true,
 						},
 					},
 				},

@@ -1,0 +1,19 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+The `mysql_role` resource creates and manages a role on a MySQL
+server.
+
+~> **Note:** MySQL introduced roles in version 8. They do not work on MySQL 5 and lower.
+
+## Example Usage
+
+{{ tffile "examples/resources/mysql_role/resource.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}

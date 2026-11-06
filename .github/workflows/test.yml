@@ -38,6 +38,29 @@ jobs:
       - name: Unit tests
         run: go test ./... -race -timeout 120s
 
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "v1.17.1"
+          terraform_wrapper: false
+      - name: Generate docs
+        run: go generate ./...
+      - name: Validate docs
+        run: go tool tfplugindocs validate --provider-name mysql
+      # Fails when the committed docs/ differs from the generated output.
+      - name: Check docs are up to date
+        run: git diff --exit-code -- docs/
+
   acceptance:
     needs: test
     runs-on: ubuntu-latest

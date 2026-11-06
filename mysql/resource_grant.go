@@ -33,6 +33,7 @@ func suppressEquivalentPrivilege(_, oldV, newV string, _ *schema.ResourceData) b
 
 func resourceGrant() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Creates and manages privileges given to a user or role on a MySQL server.",
 		CreateContext: CreateGrant,
 		UpdateContext: nil,
 		ReadContext:   ReadGrant,
@@ -44,6 +45,7 @@ func resourceGrant() *schema.Resource {
 		Schema: map[string]*schema.Schema{
 			"user": {
 				Type:          schema.TypeString,
+				Description:   "The name of the user. Conflicts with `role`.",
 				Optional:      true,
 				ForceNew:      true,
 				ConflictsWith: []string{"role"},
@@ -51,6 +53,7 @@ func resourceGrant() *schema.Resource {
 
 			"role": {
 				Type:          schema.TypeString,
+				Description:   "The role to grant `privileges` to. Conflicts with `user` and `host`. Only supported in MySQL 8 and above.",
 				Optional:      true,
 				ForceNew:      true,
 				ConflictsWith: []string{"user", "host"},
@@ -58,6 +61,7 @@ func resourceGrant() *schema.Resource {
 
 			"host": {
 				Type:          schema.TypeString,
+				Description:   "The source host of the user. Defaults to \"localhost\". Conflicts with `role`.",
 				Optional:      true,
 				ForceNew:      true,
 				Default:       "localhost",
@@ -65,22 +69,25 @@ func resourceGrant() *schema.Resource {
 			},
 
 			"database": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Description: "The database to grant privileges on. The name is quoted automatically, so surrounding backticks are optional; wildcards such as `app\\_%` are supported.",
+				Required:    true,
+				ForceNew:    true,
 			},
 
 			"table": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  "*",
+				Type:        schema.TypeString,
+				Description: "Which table to grant `privileges` on. Defaults to `*`, which is all tables. The name is quoted automatically; backticks are optional.",
+				Optional:    true,
+				ForceNew:    true,
+				Default:     "*",
 			},
 
 			"privileges": {
-				Type:     schema.TypeSet,
-				Optional: true,
-				ForceNew: true,
+				Type:        schema.TypeSet,
+				Description: "A list of privileges to grant to the user. Refer to a list of privileges (such as https://dev.mysql.com/doc/refman/5.5/en/grant.html) for applicable privileges. Conflicts with `roles`.",
+				Optional:    true,
+				ForceNew:    true,
 				Elem: &schema.Schema{
 					Type:             schema.TypeString,
 					ValidateFunc:     validatePrivilege,
@@ -93,6 +100,7 @@ func resourceGrant() *schema.Resource {
 
 			"roles": {
 				Type:          schema.TypeSet,
+				Description:   "A list of roles to grant to the user. Conflicts with `privileges`. Only supported in MySQL 8 and above.",
 				Optional:      true,
 				ForceNew:      true,
 				ConflictsWith: []string{"privileges"},
@@ -101,14 +109,16 @@ func resourceGrant() *schema.Resource {
 			},
 
 			"grant": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				ForceNew: true,
-				Default:  false,
+				Type:        schema.TypeBool,
+				Description: "Whether to also give the user privileges to grant the same privileges to other users.",
+				Optional:    true,
+				ForceNew:    true,
+				Default:     false,
 			},
 
 			"tls_option": {
 				Type:         schema.TypeString,
+				Description:  "An TLS-Option for the `GRANT` statement. The value is suffixed to `REQUIRE`. A value of 'SSL' will generate a `GRANT ... REQUIRE SSL` statement. See the MySQL `GRANT` documentation (https://dev.mysql.com/doc/refman/5.7/en/grant.html) for more. Ignored in MySQL 8 and above, and if the MySQL version is under 5.7.0. Must be `NONE`, `SSL`, `X509`, or one or more of `CIPHER '...'`, `ISSUER '...'`, `SUBJECT '...'` joined by `AND`.",
 				Optional:     true,
 				ForceNew:     true,
 				Default:      "NONE",

@@ -36,3 +36,6 @@ website/vendor
 
 # GoReleaser output
 dist/
+
+# Claude Code agent worktrees
+.claude/

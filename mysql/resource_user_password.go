@@ -13,33 +13,39 @@ import (
 
 func resourceUserPassword() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Sets and manages a randomly generated password for a user on a MySQL server, encrypted with a PGP key.",
 		CreateContext: SetUserPassword,
 		ReadContext:   ReadUserPassword,
 		DeleteContext: DeleteUserPassword,
 		Schema: map[string]*schema.Schema{
 			"user": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Description: "The user to set the password for.",
+				Required:    true,
+				ForceNew:    true,
 			},
 			"host": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  "localhost",
+				Type:        schema.TypeString,
+				Description: "The source host of the user. Defaults to `localhost`.",
+				Optional:    true,
+				ForceNew:    true,
+				Default:     "localhost",
 			},
 			"pgp_key": {
-				Type:     schema.TypeString,
-				ForceNew: true,
-				Required: true,
+				Type:        schema.TypeString,
+				Description: "Either a base-64 encoded PGP public key, or a keybase username in the form `keybase:some_person_that_exists`.",
+				ForceNew:    true,
+				Required:    true,
 			},
 			"key_fingerprint": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Description: "The fingerprint of the PGP key used to encrypt the password.",
+				Computed:    true,
 			},
 			"encrypted_password": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:        schema.TypeString,
+				Description: "The encrypted password, base64 encoded.",
+				Computed:    true,
 			},
 		},
 	}

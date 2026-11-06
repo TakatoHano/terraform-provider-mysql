@@ -19,6 +19,7 @@ const unknownDatabaseErrCode = 1049
 
 func resourceDatabase() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Creates and manages a database on a MySQL server.",
 		CreateContext: CreateDatabase,
 		UpdateContext: UpdateDatabase,
 		ReadContext:   ReadDatabase,
@@ -28,23 +29,26 @@ func resourceDatabase() *schema.Resource {
 		},
 		Schema: map[string]*schema.Schema{
 			"name": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Description: "The name of the database. This must be unique within a given MySQL server and may or may not be case-sensitive depending on the operating system on which the MySQL server is running.",
+				Required:    true,
+				ForceNew:    true,
 			},
 
 			"default_character_set": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Default:  "utf8",
+				Type:        schema.TypeString,
+				Description: "The default character set to use when a table is created without specifying an explicit character set. Defaults to \"utf8\".",
+				Optional:    true,
+				Default:     "utf8",
 
 				DiffSuppressFunc: suppressUTF8Alias,
 			},
 
 			"default_collation": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Default:  "utf8_general_ci",
+				Type:        schema.TypeString,
+				Description: "The default collation to use when a table is created without specifying an explicit collation. Defaults to `utf8_general_ci`. Each character set has its own set of collations, so changing the character set requires also changing the collation.",
+				Optional:    true,
+				Default:     "utf8_general_ci",
 
 				DiffSuppressFunc: suppressUTF8Alias,
 			},

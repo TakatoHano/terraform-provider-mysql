@@ -9,6 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/plugin"
 )
 
+//go:generate go tool tfplugindocs generate --provider-name mysql --rendered-provider-name "MySQL (TakatoHano fork)"
+
 func main() {
 	var debug bool
 	flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
