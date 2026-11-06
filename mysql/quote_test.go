@@ -91,7 +91,7 @@ func TestValidateTLSOption(t *testing.T) {
 	}
 	invalid := []string{
 		"", "SSL; DROP USER x", "SSL'", "CIPHER 'a'b'", "CIPHER 'a' OR SUBJECT 'b'",
-		"CIPHER a", "SSL AND X509", "SSL --", "NONE ", "CIPHER 'a' AND",
+		`CIPHER 'a\' AND ISSUER 'b'`, `SUBJECT 'a\b'`, "CIPHER a", "SSL AND X509", "SSL --", "NONE ", "CIPHER 'a' AND",
 	}
 	for _, v := range valid {
 		if _, errs := validateTLSOption(v, "tls_option"); len(errs) != 0 {

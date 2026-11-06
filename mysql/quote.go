@@ -62,7 +62,7 @@ func formatTableName(table string) string {
 }
 
 var (
-	tlsOptionRegexp = regexp.MustCompile(`(?i)^(NONE|SSL|X509|(CIPHER|ISSUER|SUBJECT) '[^']*'( AND (CIPHER|ISSUER|SUBJECT) '[^']*')*)$`)
+	tlsOptionRegexp = regexp.MustCompile(`(?i)^(NONE|SSL|X509|(CIPHER|ISSUER|SUBJECT) '[^'\\]*'( AND (CIPHER|ISSUER|SUBJECT) '[^'\\]*')*)$`)
 	privilegeRegexp = regexp.MustCompile(`(?i)^[a-z_ ]+(\s*\([^()'";\\]*\))?$`)
 )
 
