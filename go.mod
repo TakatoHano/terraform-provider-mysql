@@ -7,6 +7,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/terraform-plugin-sdk v1.17.2
+	github.com/keybase/go-crypto v0.0.0-20181017165231-e696c8039bba
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
 )
@@ -89,7 +90,6 @@ require (
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/keybase/go-crypto v0.0.0-20181017165231-e696c8039bba // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

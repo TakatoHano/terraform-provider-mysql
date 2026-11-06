@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 )
@@ -290,7 +291,9 @@ func DeleteGrant(d *schema.ResourceData, meta interface{}) error {
 
 		log.Printf("[DEBUG] SQL: %s", sql)
 		_, err = db.Exec(sql)
-		if err != nil {
+		// MySQL 8.4 answers 1141 when the user does not hold GRANT OPTION
+		// (older versions silently succeed); there is nothing to revoke then.
+		if me, ok := err.(*mysql.MySQLError); err != nil && !(ok && me.Number == nonexistingGrantErrCode) {
 			return fmt.Errorf("error revoking GRANT (%s): %s", sql, err)
 		}
 	}

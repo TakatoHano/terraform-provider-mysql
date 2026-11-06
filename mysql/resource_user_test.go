@@ -6,6 +6,8 @@ import (
 	"log"
 	"testing"
 
+	"github.com/go-sql-driver/mysql"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
@@ -52,7 +54,20 @@ func TestAccUser_basic(t *testing.T) {
 
 func TestAccUser_auth(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck: func() {
+			testAccPreCheck(t)
+			// The mysql_no_login plugin ships with the server but is not loaded by default.
+			db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("INSTALL PLUGIN mysql_no_login SONAME 'mysql_no_login.so'"); err != nil {
+				// 1125 = ER_UDF_EXISTS: the plugin is already installed.
+				if me, ok := err.(*mysql.MySQLError); !ok || me.Number != 1125 {
+					t.Skipf("mysql_no_login plugin cannot be installed: %s", err)
+				}
+			}
+		},
 		Providers:    testAccProviders,
 		CheckDestroy: testAccUserCheckDestroy,
 		Steps: []resource.TestStep{

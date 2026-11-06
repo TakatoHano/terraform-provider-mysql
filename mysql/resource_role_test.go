@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/terraform"
@@ -92,6 +93,10 @@ func testAccRoleCheckDestroy(roleName string) resource.TestCheckFunc {
 
 		count, err := testAccGetRoleGrantCount(roleName, db)
 		if err != nil {
+			// A dropped role has no grants at all: MySQL answers SHOW GRANTS with 1141.
+			if mysqlErr, ok := err.(*mysql.MySQLError); ok && mysqlErr.Number == nonexistingGrantErrCode {
+				return nil
+			}
 			return err
 		}
 		if count > 0 {
