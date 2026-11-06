@@ -1,0 +1,47 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+The `mysql_user` resource creates and manages a user on a MySQL
+server.
+
+~> **Note:** The password for the user is provided in plain text, and is
+obscured by an unsalted hash in the state
+([read more about sensitive data in state](https://developer.hashicorp.com/terraform/language/state/sensitive-data)).
+Care is required when using this resource, to avoid disclosing the password.
+
+## Example Usage
+
+{{ tffile "examples/resources/mysql_user/resource.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Authentication plugins
+
+The `auth_plugin` value supports:
+
+* `AWSAuthenticationPlugin` - Allows the use of IAM authentication with [Amazon
+  Aurora](https://aws.amazon.com/rds/aurora/). For more details on how to use IAM auth with
+  Aurora, see [here](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html#UsingWithRDS.IAMDBAuth.Creating).
+* `mysql_no_login` - Uses the MySQL No-Login Authentication Plugin. The
+  No-Login Authentication Plugin must be active in MySQL. For more information,
+  see [here](https://dev.mysql.com/doc/refman/5.7/en/no-login-pluggable-authentication.html).
+
+See also the MySQL [authentication plugins](https://dev.mysql.com/doc/refman/5.7/en/authentication-plugins.html) documentation.
+
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+
+The import reads `tls_option` from `mysql.user` (`ssl_type`, `ssl_cipher`, `x509_issuer`, `x509_subject`): no requirement becomes `NONE`, `ANY` becomes `SSL`, `X509` stays `X509`, and specified requirements become `CIPHER '...' AND ISSUER '...' AND SUBJECT '...'` (only the parts that are set). If a value cannot be represented (for example it contains a quote), `tls_option` is left unset and a warning is logged. `tls_option` is refreshed on every read, and values that only differ in case, spacing or clause order (`ssl` vs `SSL`) do not produce a diff.
+
+`auth_plugin` is imported only when the account uses `AWSAuthenticationPlugin` or `mysql_no_login`; for any other plugin it is left unset.
+
+~> **Caution:** User's password can't be imported.
