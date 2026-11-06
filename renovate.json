@@ -2,7 +2,8 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Minor, patch, digest and pin updates are automerged via GitHub auto-merge once CI (build, vet, staticcheck, unit and MySQL 8.0/8.4 acceptance tests) and the review requirement pass.",
-    "Major updates and Go toolchain bumps always stay manual.",
+    "Major updates and Go toolchain bumps stay manual, except majors of GitHub Actions that PR CI exercises, which are automerged.",
+    "Actions used only by release.yml (goreleaser/goreleaser-action, crazy-max/ghaction-import-gpg) stay manual because PR CI does not run the release pipeline.",
     "Updates must be at least 3 days old before Renovate proposes them (minimumReleaseAge).",
     "GitHub Actions are pinned to commit SHAs (helpers:pinGitHubActionDigests) so tag moves cannot inject code."
   ],
@@ -25,10 +26,22 @@
       "automerge": true
     },
     {
-      "description": "Automerge GitHub Actions minor/patch updates; majors stay manual.",
+      "description": "Automerge GitHub Actions minor/patch updates.",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
+    },
+    {
+      "description": "Automerge GitHub Actions majors: the workflows PR CI runs (test.yml, labeler, release-drafter) prove them.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "automerge": true
+    },
+    {
+      "description": "Release-only actions are used solely by release.yml, which PR CI does not exercise, so their majors stay manual (must come after the major automerge rule to win).",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["goreleaser/goreleaser-action", "crazy-max/ghaction-import-gpg"],
+      "automerge": false
     },
     {
       "description": "Go toolchain bumps change the supported/built Go version; review manually.",

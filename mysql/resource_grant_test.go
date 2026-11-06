@@ -329,6 +329,14 @@ func TestAccGrant_role(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_grant.test", "role", roleName),
 				),
 			},
+			{
+				ResourceName:      "mysql_grant.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				// tls_option is not stored per grant on the server, so the importer
+				// can only set the schema default.
+				ImportStateVerifyIgnore: []string{"tls_option"},
+			},
 		},
 	})
 }
@@ -364,6 +372,12 @@ func TestAccGrant_roleToUser(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_grant.test", "host", "example.com"),
 					resource.TestCheckResourceAttr("mysql_grant.test", "roles.#", "1"),
 				),
+			},
+			{
+				ResourceName:            "mysql_grant.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"tls_option"},
 			},
 		},
 	})
