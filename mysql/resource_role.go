@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -33,7 +32,7 @@ func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 	roleName := d.Get("name").(string)
 
-	sql := fmt.Sprintf("CREATE ROLE '%s'", roleName)
+	sql := "CREATE ROLE " + quoteString(roleName)
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
@@ -52,7 +51,7 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR '%s'", d.Id())
+	sql := "SHOW GRANTS FOR " + quoteString(d.Id())
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
@@ -73,7 +72,7 @@ func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("DROP ROLE '%s'", d.Get("name").(string))
+	sql := "DROP ROLE " + quoteString(d.Get("name").(string))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)

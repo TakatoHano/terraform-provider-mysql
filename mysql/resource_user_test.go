@@ -53,6 +53,42 @@ func TestAccUser_basic(t *testing.T) {
 	})
 }
 
+func TestAccUser_specialChars(t *testing.T) {
+	user := "tf-acc-quote-user"
+	password := `p'a\ss"w;d` + "`"
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_specialChars(user, password),
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", user),
+					testAccCanConnectAs(user, password, "information_schema"),
+				),
+			},
+			{
+				Config: testAccUserConfig_specialChars(user, password+"'2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCanConnectAs(user, password+"'2", "information_schema"),
+				),
+			},
+		},
+	})
+}
+
+func testAccUserConfig_specialChars(user, password string) string {
+	return fmt.Sprintf(`
+resource "mysql_user" "test" {
+    user               = %q
+    host               = "%%"
+    plaintext_password = %q
+}
+`, user, password)
+}
+
 func TestAccUser_auth(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {

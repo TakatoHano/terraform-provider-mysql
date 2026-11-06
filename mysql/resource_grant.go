@@ -66,8 +66,11 @@ func resourceGrant() *schema.Resource {
 				Type:     schema.TypeSet,
 				Optional: true,
 				ForceNew: true,
-				Elem:     &schema.Schema{Type: schema.TypeString},
-				Set:      schema.HashString,
+				Elem: &schema.Schema{
+					Type:         schema.TypeString,
+					ValidateFunc: validatePrivilege,
+				},
+				Set: schema.HashString,
 			},
 
 			"roles": {
@@ -87,13 +90,24 @@ func resourceGrant() *schema.Resource {
 			},
 
 			"tls_option": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  "NONE",
+				Type:         schema.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				Default:      "NONE",
+				ValidateFunc: validateTLSOption,
 			},
 		},
 	}
+}
+
+// flattenQuoted joins values as comma-separated, escaped string literals.
+func flattenQuoted(list []interface{}) string {
+	var result []string
+	for _, v := range list {
+		result = append(result, quoteString(v.(string)))
+	}
+
+	return strings.Join(result, ", ")
 }
 
 func flattenList(list []interface{}, template string) string {
@@ -105,30 +119,15 @@ func flattenList(list []interface{}, template string) string {
 	return strings.Join(result, ", ")
 }
 
-func formatDatabaseName(database string) string {
-	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
-		return fmt.Sprintf("`%s`", database)
-	}
-
-	return database
-}
-
-func formatTableName(table string) string {
-	if table == "" || table == "*" {
-		return "*"
-	}
-	return fmt.Sprintf("`%s`", table)
-}
-
 func userOrRole(user string, host string, role string, hasRoles bool) (string, bool, error) {
 	if len(user) > 0 && len(host) > 0 {
-		return fmt.Sprintf("'%s'@'%s'", user, host), false, nil
+		return userHostLiteral(user, host), false, nil
 	} else if len(role) > 0 {
 		if !hasRoles {
 			return "", false, fmt.Errorf("roles are only supported on MySQL 8 and above")
 		}
 
-		return fmt.Sprintf("'%s'", role), true, nil
+		return quoteString(role), true, nil
 	} else {
 		return "", false, fmt.Errorf("user with host or a role is required")
 	}
@@ -141,7 +140,7 @@ func supportsRoles(db *sql.DB) (bool, error) {
 	}
 
 	requiredVersion, _ := version.NewVersion("8.0.0")
-	hasRoles := currentVersion.GreaterThan(requiredVersion)
+	hasRoles := currentVersion.GreaterThanOrEqual(requiredVersion)
 	return hasRoles, nil
 }
 
@@ -172,7 +171,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		}
 		listOfRoles := attr.(*schema.Set).List()
 		rolesGranted = len(listOfRoles)
-		privilegesOrRoles = flattenList(listOfRoles, "'%s'")
+		privilegesOrRoles = flattenQuoted(listOfRoles)
 	} else {
 		return diag.Errorf("one of privileges or roles is required")
 	}
@@ -204,7 +203,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		stmtSQL += fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string))
 	}
 
-	if !hasRoles && !isRole && d.Get("grant").(bool) {
+	if !isRole && d.Get("grant").(bool) {
 		stmtSQL += " WITH GRANT OPTION"
 	}
 
@@ -302,7 +301,7 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 
 	whatToRevoke := fmt.Sprintf("ALL ON %s.%s", database, table)
 	if len(roles.List()) > 0 {
-		whatToRevoke = flattenList(roles.List(), "'%s'")
+		whatToRevoke = flattenQuoted(roles.List())
 	} else if len(privileges.List()) > 0 {
 		privilegeList := flattenList(privileges.List(), "%s")
 		whatToRevoke = fmt.Sprintf("%s ON %s.%s", privilegeList, database, table)
@@ -340,7 +339,7 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return nil, err
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", user, host)
+	sql := "SHOW GRANTS FOR " + userHostLiteral(user, host)
 	rows, err := db.QueryContext(ctx, sql)
 
 	if err != nil {

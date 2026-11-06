@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"math/rand"
@@ -42,8 +43,100 @@ func TestAccGrant(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_grant.test", "tls_option", "SSL"),
 				),
 			},
+			{
+				Config: testAccGrantConfig_withGrantOption(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilegeExists("mysql_grant.test", "WITH GRANT OPTION"),
+					resource.TestCheckResourceAttr("mysql_grant.test", "grant", "true"),
+				),
+			},
 		},
 	})
+}
+
+func TestAccGrant_specialChars(t *testing.T) {
+	dbName := "tf-acc-quote"
+	user := "tf-acc-quote-user"
+	password := `p'a\ss"w;d` + "`"
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfig_specialChars(dbName, user, password),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilegeExists("mysql_grant.test", "SELECT"),
+					resource.TestCheckResourceAttr("mysql_grant.test", "database", dbName),
+					testAccCanConnectAs(user, password, dbName),
+				),
+			},
+		},
+	})
+}
+
+func testAccGrantConfig_withGrantOption(dbName string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user     = "jdoe-%s"
+  host     = "example.com"
+}
+
+resource "mysql_grant" "test" {
+  user       = "${mysql_user.test.user}"
+  host       = "${mysql_user.test.host}"
+  database   = "${mysql_database.test.name}"
+  privileges = ["UPDATE", "SELECT"]
+  grant      = true
+}
+`, dbName, dbName)
+}
+
+func testAccGrantConfig_specialChars(dbName, user, password string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = %q
+}
+
+resource "mysql_user" "test" {
+  user               = %q
+  host               = "%%"
+  plaintext_password = %q
+}
+
+resource "mysql_grant" "test" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  database   = mysql_database.test.name
+  privileges = ["SELECT"]
+}
+`, dbName, user, password)
+}
+
+// testAccCanConnectAs opens a new connection with the given credentials and
+// checks that the user can list the tables of the given database.
+func testAccCanConnectAs(user, password, dbName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		cfg := testAccProvider.Meta().(*MySQLConfiguration).Config.Clone()
+		cfg.User = user
+		cfg.Passwd = password
+		cfg.DBName = ""
+		db, err := sql.Open("mysql", cfg.FormatDSN())
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+
+		rows, err := db.Query("SHOW TABLES FROM " + quoteIdentifier(dbName))
+		if err != nil {
+			return fmt.Errorf("connecting as %q and reading %q failed: %s", user, dbName, err)
+		}
+		return rows.Close()
+	}
 }
 
 func TestAccGrant_role(t *testing.T) {
