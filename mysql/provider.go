@@ -175,14 +175,21 @@ func Provider() *schema.Provider {
 							Description: "The endpoint of the RDS to use. If you are managing by Terraform, you can set the value from `aws_db_instance` or `aws_rds_cluster`'s endpoint.",
 							Required:    true,
 						},
+						"mode": {
+							Type:         schema.TypeString,
+							Description:  "How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.",
+							Optional:     true,
+							Default:      "ssh",
+							ValidateFunc: validation.StringInSlice([]string{"ssh", "port_forwarding"}, false),
+						},
 						"ssh_user": {
 							Type:        schema.TypeString,
-							Description: "SSH user name. Defaults to current user name.",
+							Description: "SSH user name (`ssh` mode only). Defaults to current user name.",
 							Optional:    true,
 						},
 						"ssh_key_path": {
 							Type:        schema.TypeString,
-							Description: "SSH user's private key path. Defaults to `~/.ssh/id_rsa`.",
+							Description: "SSH user's private key path (`ssh` mode only). Defaults to `~/.ssh/id_rsa`.",
 							Optional:    true,
 						},
 						"aws_profile": {
@@ -223,14 +230,21 @@ func Provider() *schema.Provider {
 							Description: "The endpoint of the DB server to use.",
 							Required:    true,
 						},
+						"mode": {
+							Type:         schema.TypeString,
+							Description:  "How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.",
+							Optional:     true,
+							Default:      "ssh",
+							ValidateFunc: validation.StringInSlice([]string{"ssh", "port_forwarding"}, false),
+						},
 						"ssh_user": {
 							Type:        schema.TypeString,
-							Description: "SSH user name. Defaults to current user name.",
+							Description: "SSH user name (`ssh` mode only). Defaults to current user name.",
 							Optional:    true,
 						},
 						"ssh_key_path": {
 							Type:        schema.TypeString,
-							Description: "SSH user's private key path. Defaults to `~/.ssh/id_rsa`.",
+							Description: "SSH user's private key path (`ssh` mode only). Defaults to `~/.ssh/id_rsa`.",
 							Optional:    true,
 						},
 					},
@@ -292,7 +306,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 	}
 	var lp uint16
-	if pfConfMap != nil {
+	if pfConfMap != nil || sessionConf != nil {
 		lp, err = localPortFromEndpoint(endpoint)
 		if err != nil {
 			return nil, diag.FromErr(err)
@@ -308,8 +322,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	// same local port with the same settings instead of failing with
 	// "address already in use".
 	var tunnelKey string
-	if pfConf != nil {
-		tunnelKey = fmt.Sprintf("%d|%v", lp, pfConfMap)
+	if sessionConf != nil {
+		tunnelKey = fmt.Sprintf("%d|%s|%v", lp, sessionConf.TunnelKey(), pfConfMap)
+	} else if pfConf != nil {
+		tunnelKey = fmt.Sprintf("%d|%s|%v", lp, port_forward.ModeSSH, pfConfMap)
 	}
 	var tunnel *port_forward.Tunnel
 	if tunnelKey != "" {
@@ -323,7 +339,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		activeConfigsMu.Unlock()
 	}
 	if tunnel == nil {
-		tunnel, err = port_forward.Connect(sessionConf, pfConf)
+		tunnel, err = port_forward.Connect(sessionConf, pfConf, lp)
 		if err != nil {
 			return nil, diag.FromErr(err)
 		}
