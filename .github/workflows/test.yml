@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: 'go.mod'
           cache: true
@@ -31,7 +31,7 @@ jobs:
         run: go vet ./...
       # Blocking: any staticcheck finding fails CI.
       - name: staticcheck
-        uses: dominikh/staticcheck-action@v1
+        uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1
         with:
           version: "latest"
           install-go: false
@@ -59,12 +59,12 @@ jobs:
           --health-timeout=5s
           --health-retries=20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: 'go.mod'
           cache: true
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
