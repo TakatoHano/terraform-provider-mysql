@@ -228,6 +228,8 @@ provider "mysql" {
 * `aws_profile` - (Optional) AWS user's profile(SSO logged in), can also be sourced from the `AWS_PROFILE` or `AWS_DEFAULT_PROFILE` environment variables. If you use AWS credential, can aloso be sourced from the `AWS_ACCESS_KEY_ID`,`AWS_SECRET_ACCESS_KEY_ID`, and `AWS_SESSION_TOKEN` environment variables.
 * `region` -  (Optional) AWS region, can also be sourced from the `AWS_REGION` or `AWS_DEFAULT_REGION` environment variables.
 
+~> **Notes.** The SSH tunnel, the `session-manager-plugin` process and the SSM session are closed when the provider exits. An `aws_profile` that does not exist in the shared AWS config is an error.
+
 ~> **Notes.** The local port forward listener binds to `127.0.0.1` only, so it is not reachable from other hosts.
 
 ### port_forward_client_config Argument Reference
