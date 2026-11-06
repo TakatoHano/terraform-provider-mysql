@@ -14,9 +14,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	//lint:ignore SA1019 aws-sdk-go v1 is deprecated; migrating to v2 is out of scope here
 	"github.com/aws/aws-sdk-go/service/ssm"
+	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 )
+
+// newSSMClient builds the SSM API client used by connect. It is a variable so
+// that tests can inject a mock.
+var newSSMClient = func(s *session.Session) ssmiface.SSMAPI { return ssm.New(s) }
 
 type sessionConfig struct {
 	instanceID string
@@ -111,7 +116,11 @@ func (conf *sessionConfig) validate() error {
 }
 
 func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
-	proxyCmd, closeSession, err := openSession(ssm.New(conf.session), conf.instanceID, conf.profile)
+	// Region and endpoint are resolved once from the session (the same values
+	// ssm.New(conf.session) would use) so openSession only needs the interface.
+	region := aws.StringValue(conf.session.Config.Region)
+	endpoint := conf.session.ClientConfig(ssm.ServiceName).Endpoint
+	proxyCmd, closeSession, err := openSession(newSSMClient(conf.session), conf.instanceID, conf.profile, region, endpoint)
 	if err != nil {
 		return err
 	}
@@ -154,7 +163,7 @@ func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
 	return nil
 }
 
-func openSession(svc *ssm.SSM, instanceID, profile string) (*exec.Cmd, func() error, error) {
+func openSession(svc ssmiface.SSMAPI, instanceID, profile, region, endpoint string) (*exec.Cmd, func() error, error) {
 	in := &ssm.StartSessionInput{
 		DocumentName: aws.String("AWS-StartSSHSession"),
 		Parameters: map[string][]*string{
@@ -177,7 +186,7 @@ func openSession(svc *ssm.SSM, instanceID, profile string) (*exec.Cmd, func() er
 		return nil
 	}
 
-	cmd, err := sessionManagerPlugin(svc, in, out, profile)
+	cmd, err := sessionManagerPlugin(in, out, profile, region, endpoint)
 	if err != nil {
 		defer close()
 		return nil, nil, err
@@ -187,10 +196,9 @@ func openSession(svc *ssm.SSM, instanceID, profile string) (*exec.Cmd, func() er
 }
 
 func sessionManagerPlugin(
-	svc *ssm.SSM,
 	in *ssm.StartSessionInput,
 	out *ssm.StartSessionOutput,
-	profile string,
+	profile, region, endpoint string,
 ) (*exec.Cmd, error) {
 	command := "session-manager-plugin"
 	if runtime.GOOS == "windows" {
@@ -205,11 +213,9 @@ func sessionManagerPlugin(
 	if err != nil {
 		return nil, err
 	}
-	region := *svc.Config.Region
 	if profile == "" {
 		profile = getAWSProfile()
 	}
-	endpoint := svc.Endpoint
 
 	cmd := exec.Command(command, string(encodedOut), region, "StartSession", profile, string(encodedIn), endpoint)
 
