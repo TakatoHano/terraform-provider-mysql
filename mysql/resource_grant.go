@@ -3,9 +3,9 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
@@ -14,7 +14,22 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
-const nonexistingGrantErrCode = 1141
+const (
+	nonexistingGrantErrCode = 1141
+	// ER_PASSWORD_NO_MATCH: SHOW GRANTS for a user that does not exist on some versions.
+	noMatchingUserErrCode = 1133
+)
+
+// hashPrivilege is the set hash function of mysql_grant.privileges.
+func hashPrivilege(v interface{}) int {
+	return schema.HashString(normalizePrivilege(v.(string)))
+}
+
+// suppressEquivalentPrivilege hides diffs between spellings of the same
+// privilege, most importantly ALL vs ALL PRIVILEGES (MySQL always reports the latter).
+func suppressEquivalentPrivilege(_, oldV, newV string, _ *schema.ResourceData) bool {
+	return oldV != "" && newV != "" && normalizePrivilege(oldV) == normalizePrivilege(newV)
+}
 
 func resourceGrant() *schema.Resource {
 	return &schema.Resource{
@@ -67,10 +82,13 @@ func resourceGrant() *schema.Resource {
 				Optional: true,
 				ForceNew: true,
 				Elem: &schema.Schema{
-					Type:         schema.TypeString,
-					ValidateFunc: validatePrivilege,
+					Type:             schema.TypeString,
+					ValidateFunc:     validatePrivilege,
+					DiffSuppressFunc: suppressEquivalentPrivilege,
 				},
-				Set: schema.HashString,
+				// Hash the canonical form so that ALL and ALL PRIVILEGES (and
+				// differently cased or spaced privileges) land in the same slot.
+				Set: hashPrivilege,
 			},
 
 			"roles": {
@@ -243,17 +261,146 @@ func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) di
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR %s", userOrRole)
-
-	log.Println("[DEBUG] SQL:", sql)
-
-	_, err = db.ExecContext(ctx, sql)
+	entries, err := showGrants(ctx, db, userOrRole)
 	if err != nil {
-		log.Printf("[WARN] GRANT not found for %s - removing from state", userOrRole)
+		if isMissingGrantError(err) {
+			log.Printf("[WARN] GRANT not found for %s - removing from state", userOrRole)
+			d.SetId("")
+			return nil
+		}
+		return diag.Errorf("error reading grants for %s: %s", userOrRole, err)
+	}
+
+	// Role grants: SHOW GRANTS does not attach a database to them, so only the
+	// roles themselves are compared. Roles granted by other means are ignored;
+	// configured roles that are no longer granted are dropped from state.
+	if current, ok := d.Get("roles").(*schema.Set); ok && current.Len() > 0 {
+		granted := map[string]bool{}
+		for _, e := range entries {
+			for _, r := range e.Roles {
+				granted[r] = true
+			}
+		}
+		var kept []string
+		for _, r := range current.List() {
+			if granted[r.(string)] {
+				kept = append(kept, r.(string))
+			}
+		}
+		if len(kept) == 0 {
+			log.Printf("[WARN] roles of %s not found - removing from state", userOrRole)
+			d.SetId("")
+			return nil
+		}
+		if err := d.Set("roles", kept); err != nil {
+			return diag.FromErr(err)
+		}
+		return nil
+	}
+
+	entry, ok := findGrantEntry(entries, d.Get("database").(string), d.Get("table").(string))
+	if !ok {
+		log.Printf("[WARN] no grant on %s.%s for %s - removing from state",
+			d.Get("database").(string), d.Get("table").(string), userOrRole)
 		d.SetId("")
+		return nil
+	}
+
+	privileges := entry.Privileges
+	if isImpliedAllPrivileges(d, entry) {
+		// MySQL 8 spells ALL on *.* out as a list of every static privilege.
+		privileges = []string{"ALL PRIVILEGES"}
+	}
+	if err := d.Set("privileges", privileges); err != nil {
+		return diag.FromErr(err)
+	}
+	if err := d.Set("grant", entry.GrantOption); err != nil {
+		return diag.FromErr(err)
 	}
 
 	return nil
+}
+
+// isMissingGrantError reports whether err means the user or role has no grants
+// (or does not exist at all).
+func isMissingGrantError(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && (me.Number == nonexistingGrantErrCode || me.Number == noMatchingUserErrCode)
+}
+
+// showGrants runs SHOW GRANTS FOR grantee (an already quoted user or role) and
+// parses the result.
+func showGrants(ctx context.Context, db *sql.DB, grantee string) ([]grantEntry, error) {
+	query := "SHOW GRANTS FOR " + grantee
+	log.Println("[DEBUG] SQL:", query)
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var lines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return nil, err
+		}
+		lines = append(lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return parseShowGrants(lines), nil
+}
+
+func normalizeGrantTable(table string) string {
+	table = unwrapBackticks(table)
+	if table == "" {
+		return "*"
+	}
+	return table
+}
+
+// findGrantEntry returns the privilege entry matching database and table.
+func findGrantEntry(entries []grantEntry, database, table string) (grantEntry, bool) {
+	database = unwrapBackticks(database)
+	table = normalizeGrantTable(table)
+	for _, e := range entries {
+		if len(e.Roles) > 0 {
+			continue
+		}
+		if e.Database == database && normalizeGrantTable(e.Table) == table {
+			return e, true
+		}
+	}
+	return grantEntry{}, false
+}
+
+// isImpliedAllPrivileges detects the MySQL 8 behaviour of listing every static
+// privilege for ALL on *.* instead of "ALL PRIVILEGES".
+func isImpliedAllPrivileges(d *schema.ResourceData, entry grantEntry) bool {
+	if entry.Database != "*" || normalizeGrantTable(entry.Table) != "*" {
+		return false
+	}
+	current, ok := d.Get("privileges").(*schema.Set)
+	if !ok || current.Len() != 1 || normalizePrivilege(current.List()[0].(string)) != "ALL PRIVILEGES" {
+		return false
+	}
+	have := map[string]bool{}
+	for _, p := range entry.Privileges {
+		have[p] = true
+	}
+	if have["ALL PRIVILEGES"] {
+		return false
+	}
+	for _, p := range []string{"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX"} {
+		if !have[p] {
+			return false
+		}
+	}
+	return true
 }
 
 func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -319,82 +466,90 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 
 func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	// terraform import mysql_grant.user user@host:database
+	// terraform import mysql_grant.role role:database
 	id := d.Id()
-	userHostDB := strings.SplitN(id, "@", 2)
 
-	if len(userHostDB) != 2 {
-		return nil, fmt.Errorf("wrong ID format %s (expected USER@HOST:DATABASE)", d.Id())
+	var user, host, role, database, grantee string
+	if strings.Contains(id, "@") {
+		userHostDB := strings.SplitN(id, "@", 2)
+		hostDB := strings.SplitN(userHostDB[1], ":", 2)
+		if len(hostDB) != 2 {
+			return nil, fmt.Errorf("wrong ID format %s (expected USER@HOST:DATABASE or ROLE:DATABASE)", id)
+		}
+		user, host, database = userHostDB[0], hostDB[0], hostDB[1]
+		grantee = userHostLiteral(user, host)
+	} else {
+		roleDB := strings.SplitN(id, ":", 2)
+		if len(roleDB) != 2 {
+			return nil, fmt.Errorf("wrong ID format %s (expected USER@HOST:DATABASE or ROLE:DATABASE)", id)
+		}
+		role, database = roleDB[0], roleDB[1]
+		grantee = quoteString(role)
 	}
-
-	user := userHostDB[0]
-	hostDB := strings.SplitN(userHostDB[1], ":", 2)
-	if len(hostDB) != 2 {
-		return nil, fmt.Errorf("wrong ID format %s (expected USER@HOST:DATABASE)", d.Id())
-	}
-	host := hostDB[0]
-	database := hostDB[1]
+	database = unwrapBackticks(database)
 
 	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
 		return nil, err
 	}
 
-	sql := "SHOW GRANTS FOR " + userHostLiteral(user, host)
-	rows, err := db.QueryContext(ctx, sql)
-
+	entries, err := showGrants(ctx, db, grantee)
 	if err != nil {
 		return nil, err
 	}
 
-	defer rows.Close()
-	re := regexp.MustCompile(`^GRANT (.+) ON (.+?)\.(.+?) TO`)
-	results := []*schema.ResourceData{}
-
-	for rows.Next() {
-		var grant string
-
-		err := rows.Scan(&grant)
-
-		if err != nil {
-			return nil, err
-		}
-
-		m := re.FindStringSubmatch(grant)
-
-		if len(m) != 4 {
-			return nil, fmt.Errorf("failed to parse grant statement: %s", grant)
-		}
-
-		if database != strings.Trim(m[2], "`") {
-			continue
-		}
-
-		privileges := splitPrivileges(m[1])
-		table := strings.Trim(m[3], "`")
-		d := resourceGrant().Data(nil)
-		d.SetId(id)
-		d.Set("user", user)
-		d.Set("host", host)
-		d.Set("database", database)
-		d.Set("table", table)
-		d.Set("tls_option", "NONE")
-		d.Set("privileges", privileges)
-
-		results = append(results, d)
-		break
+	if role != "" {
+		// Mirror the schema default so that the imported state matches a config
+		// that only sets role.
+		host = "localhost"
+		_ = d.Set("role", role)
+	} else {
+		_ = d.Set("user", user)
 	}
-	if len(results) == 0 {
-		return nil, fmt.Errorf("grant of user %s, host %s, and database %s not found", user, host, database)
+	_ = d.Set("host", host)
+	_ = d.Set("database", database)
+	_ = d.Set("tls_option", "NONE")
+
+	if entry, ok := pickImportEntry(entries, database); ok {
+		_ = d.Set("table", normalizeGrantTable(entry.Table))
+		_ = d.Set("privileges", entry.Privileges)
+		_ = d.Set("grant", entry.GrantOption)
+		return []*schema.ResourceData{d}, nil
 	}
 
-	return results, nil
+	// No privileges on that database: fall back to roles granted to the user.
+	if role == "" {
+		var roles []string
+		for _, e := range entries {
+			roles = append(roles, e.Roles...)
+		}
+		if len(roles) > 0 {
+			_ = d.Set("table", "*")
+			_ = d.Set("roles", roles)
+			return []*schema.ResourceData{d}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("grant of %s on database %s not found", grantee, database)
 }
 
-func splitPrivileges(privilegesStr string) []string {
-	var privileges []string
-
-	for _, v := range strings.Split(privilegesStr, ",") {
-		privileges = append(privileges, strings.TrimSpace(v))
+// pickImportEntry prefers the database-wide (table "*") entry of database and
+// falls back to the first entry for any of its tables.
+func pickImportEntry(entries []grantEntry, database string) (grantEntry, bool) {
+	var first *grantEntry
+	for i, e := range entries {
+		if len(e.Roles) > 0 || e.Database != database {
+			continue
+		}
+		if normalizeGrantTable(e.Table) == "*" {
+			return e, true
+		}
+		if first == nil {
+			first = &entries[i]
+		}
 	}
-	return privileges
+	if first != nil {
+		return *first, true
+	}
+	return grantEntry{}, false
 }
