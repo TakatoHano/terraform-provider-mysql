@@ -89,6 +89,8 @@ The recommended `mode = "port_forwarding"` uses the SSM document
 the instance and no `ssh_user`/`ssh_key_path`. `rds_endpoint` may be given as
 `host` (port 3306 is assumed) or `host:port`.
 
+~> **Note:** `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues. The default `ssh` mode is the long-standing, production-tested path.
+
 ```terraform
 # Create VPC and Subnets
 module "vpc" {
@@ -271,7 +273,7 @@ Required:
 Optional:
 
 - `aws_profile` (String) AWS user's profile (SSO logged in), can also be sourced from the `AWS_PROFILE` or `AWS_DEFAULT_PROFILE` environment variables. If you use AWS credentials, they can also be sourced from the `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY_ID`, and `AWS_SESSION_TOKEN` environment variables.
-- `mode` (String) How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.
+- `mode` (String) How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`. `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues.
 - `region` (String) AWS region, can also be sourced from the `AWS_REGION` or `AWS_DEFAULT_REGION` environment variables.
 - `ssh_key_path` (String) SSH user's private key path (`ssh` mode only). Defaults to `~/.ssh/id_rsa`.
 - `ssh_user` (String) SSH user name (`ssh` mode only). Defaults to current user name.
@@ -287,6 +289,6 @@ Required:
 
 Optional:
 
-- `mode` (String) How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.
+- `mode` (String) How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`. `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues.
 - `ssh_key_path` (String) SSH user's private key path (`ssh` mode only). Defaults to `~/.ssh/id_rsa`.
 - `ssh_user` (String) SSH user name (`ssh` mode only). Defaults to current user name.

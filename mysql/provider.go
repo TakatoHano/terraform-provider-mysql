@@ -177,7 +177,7 @@ func Provider() *schema.Provider {
 						},
 						"mode": {
 							Type:         schema.TypeString,
-							Description:  "How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.",
+							Description:  "How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`. `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues.",
 							Optional:     true,
 							Default:      "ssh",
 							ValidateFunc: validation.StringInSlice([]string{"ssh", "port_forwarding"}, false),
@@ -232,7 +232,7 @@ func Provider() *schema.Provider {
 						},
 						"mode": {
 							Type:         schema.TypeString,
-							Description:  "How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`.",
+							Description:  "How to reach the RDS endpoint. `ssh` (default) tunnels SSH over an SSM session (`AWS-StartSSHSession`) and needs sshd and an SSH key on the EC2 instance. `port_forwarding` uses the SSM document `AWS-StartPortForwardingSessionToRemoteHost`: it needs no SSH keys, no sshd and no `ssh_user`/`ssh_key_path`. Defaults to `ssh`; a future major version may change the default to `port_forwarding`. `port_forwarding` is experimental: it is covered by offline tests only and has not yet been verified against real AWS; please report issues.",
 							Optional:     true,
 							Default:      "ssh",
 							ValidateFunc: validation.StringInSlice([]string{"ssh", "port_forwarding"}, false),
