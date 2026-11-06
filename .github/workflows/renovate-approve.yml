@@ -2,9 +2,10 @@ name: Renovate auto-approve
 
 # Why this is safe here:
 # - Renovate PRs only change dependency versions (go.mod/go.sum, workflow pins).
-# - The approval only satisfies the "1 approving review" rule; the merge itself
-#   (GitHub auto-merge) still waits for the full CI, including the MySQL 8.0/8.4
-#   acceptance tests.
+# - The approval only satisfies the "1 approving review" rule. The merge itself
+#   is meant to wait for the full CI, including the MySQL 8.0/8.4 acceptance
+#   tests; that gate is only enforced by GitHub if the test/acceptance jobs are
+#   configured as required status checks in branch protection.
 # - Renovate only automerges minor/patch/digest/pin updates (see renovate.json);
 #   major updates and Go toolchain bumps are not automerged and still need a
 #   human decision.
