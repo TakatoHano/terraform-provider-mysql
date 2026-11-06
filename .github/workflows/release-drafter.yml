@@ -14,7 +14,7 @@ jobs:
   release_draft:
     runs-on: ubuntu-latest
     steps:
-      - uses: release-drafter/release-drafter@v7
+      - uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7
 
   publish_release:
     if: github.event_name == 'workflow_dispatch'
@@ -22,7 +22,7 @@ jobs:
       - release_draft
     runs-on: ubuntu-latest
     steps:
-      - uses: release-drafter/release-drafter@v7
+      - uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7
         with:
           publish: true
           token: ${{ secrets.GITHUB_TOKEN }}

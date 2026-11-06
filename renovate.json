@@ -2,11 +2,15 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Minor, patch, digest and pin updates are automerged via GitHub auto-merge once CI (build, vet, staticcheck, unit and MySQL 8.0/8.4 acceptance tests) and the review requirement pass.",
-    "Major updates and Go toolchain bumps always stay manual."
+    "Major updates and Go toolchain bumps always stay manual.",
+    "Updates must be at least 3 days old before Renovate proposes them (minimumReleaseAge).",
+    "GitHub Actions are pinned to commit SHAs (helpers:pinGitHubActionDigests) so tag moves cannot inject code."
   ],
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
   ],
+  "minimumReleaseAge": "3 days",
   "postUpdateOptions": [
     "gomodTidy"
   ],
