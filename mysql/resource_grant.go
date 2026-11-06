@@ -545,6 +545,7 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		if len(roles) > 0 {
 			_ = d.Set("table", "*")
 			_ = d.Set("roles", roles)
+			_ = d.Set("grant", false)
 			return []*schema.ResourceData{d}, nil
 		}
 	}
