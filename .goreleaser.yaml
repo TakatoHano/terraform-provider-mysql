@@ -1,11 +1,12 @@
 # Visit https://goreleaser.com for documentation on how to customize this
 # behavior.
+version: 2
 before:
   hooks:
     # this is just an example and not a requirement for provider building/publishing
     - go mod tidy
 snapshot:
-  name_template: '{{ .Version }}'
+  version_template: '{{ .Version }}'
 builds:
   - env:
       - CGO_ENABLED=0
@@ -29,8 +30,9 @@ builds:
         goarch: '386'
     binary: "{{ .ProjectName }}_v{{ .Version }}"
 archives:
-- format: zip
-  name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  - formats:
+      - zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 checksum:
   extra_files:
     - glob: 'terraform-registry-manifest.json'
@@ -45,4 +47,4 @@ release:
     - glob: 'terraform-registry-manifest.json'
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
 changelog:
-  skip: true
+  disable: true
