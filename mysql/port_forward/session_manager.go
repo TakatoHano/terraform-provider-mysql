@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"runtime"
 	"strconv"
 
@@ -18,6 +17,7 @@ import (
 
 type sessionConfig struct {
 	instanceID string
+	profile    string
 	session    *session.Session
 }
 
@@ -45,6 +45,8 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 		profile = v
 	}
 
+	sessionConf.profile = profile
+
 	region := ""
 	if v, ok := confMap["region"].(string); ok && v != "" {
 		region = v
@@ -64,8 +66,7 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 		pfConf["db_endpoint"] = v
 	}
 
-	cu, _ := user.Current()
-	pfConf["ssh_user"] = cu.Username
+	pfConf["ssh_user"] = currentUsername()
 	if v, ok := confMap["ssh_user"].(string); ok && v != "" {
 		pfConf["ssh_user"] = v
 	}
@@ -107,7 +108,7 @@ func (conf *sessionConfig) validate() error {
 }
 
 func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
-	proxyCmd, closeSession, err := openSession(ssm.New(conf.session), conf.instanceID)
+	proxyCmd, closeSession, err := openSession(ssm.New(conf.session), conf.instanceID, conf.profile)
 	if err != nil {
 		return err
 	}
@@ -117,9 +118,8 @@ func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
 		errors := err
 
 		if err := closeSession(); err != nil {
-			errors = multierror.Append(err)
+			errors = multierror.Append(errors, err)
 		}
-		closeSession()
 		return errors
 	}
 
@@ -128,9 +128,8 @@ func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
 		errors := err
 
 		if err := closeSession(); err != nil {
-			errors = multierror.Append(err)
+			errors = multierror.Append(errors, err)
 		}
-		closeSession()
 		return errors
 	}
 
@@ -138,13 +137,13 @@ func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
 		errors := err
 
 		if err := sshClient.Close(); err != nil {
-			errors = multierror.Append(err)
+			errors = multierror.Append(errors, err)
 		}
 		if err := killProxyCmd(); err != nil {
-			errors = multierror.Append(err)
+			errors = multierror.Append(errors, err)
 		}
 		if err := closeSession(); err != nil {
-			errors = multierror.Append(err)
+			errors = multierror.Append(errors, err)
 		}
 		return errors
 	}
@@ -152,7 +151,7 @@ func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
 	return nil
 }
 
-func openSession(svc *ssm.SSM, instanceID string) (*exec.Cmd, func() error, error) {
+func openSession(svc *ssm.SSM, instanceID, profile string) (*exec.Cmd, func() error, error) {
 	in := &ssm.StartSessionInput{
 		DocumentName: aws.String("AWS-StartSSHSession"),
 		Parameters: map[string][]*string{
@@ -175,7 +174,7 @@ func openSession(svc *ssm.SSM, instanceID string) (*exec.Cmd, func() error, erro
 		return nil
 	}
 
-	cmd, err := sessionManagerPlugin(svc, in, out)
+	cmd, err := sessionManagerPlugin(svc, in, out, profile)
 	if err != nil {
 		defer close()
 		return nil, nil, err
@@ -188,6 +187,7 @@ func sessionManagerPlugin(
 	svc *ssm.SSM,
 	in *ssm.StartSessionInput,
 	out *ssm.StartSessionOutput,
+	profile string,
 ) (*exec.Cmd, error) {
 	command := "session-manager-plugin"
 	if runtime.GOOS == "windows" {
@@ -203,7 +203,9 @@ func sessionManagerPlugin(
 		return nil, err
 	}
 	region := *svc.Config.Region
-	profile := getAWSProfile()
+	if profile == "" {
+		profile = getAWSProfile()
+	}
 	endpoint := svc.Endpoint
 
 	cmd := exec.Command(command, string(encodedOut), region, "StartSession", profile, string(encodedIn), endpoint)

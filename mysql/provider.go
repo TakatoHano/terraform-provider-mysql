@@ -104,7 +104,7 @@ func Provider() terraform.ResourceProvider {
 				Type:        schema.TypeList,
 				Optional:    true,
 				MaxItems:    1,
-				Description: "Configuration for use aws sesion manager.",
+				Description: "Configuration for use aws session manager.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"ec2_instance_id": {
@@ -220,8 +220,14 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 			return nil, err
 		}
 	}
-	lp, _ := strconv.Atoi(strings.SplitN(d.Get("endpoint").(string), ":", 2)[1])
-	pfConf, err := port_forward.ParsePFConfig(pfConfMap, uint16(lp))
+	var lp uint16
+	if pfConfMap != nil {
+		lp, err = localPortFromEndpoint(endpoint)
+		if err != nil {
+			return nil, err
+		}
+	}
+	pfConf, err := port_forward.ParsePFConfig(pfConfMap, lp)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +241,20 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		MaxConnLifetime: time.Duration(d.Get("max_conn_lifetime_sec").(int)) * time.Second,
 		MaxOpenConns:    d.Get("max_open_conns").(int),
 	}, nil
+}
+
+// localPortFromEndpoint extracts the local port from a host:port endpoint.
+// It is only needed when port forwarding is enabled.
+func localPortFromEndpoint(endpoint string) (uint16, error) {
+	_, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return 0, fmt.Errorf("endpoint must be host:port when port forwarding is enabled (got %q): %v", endpoint, err)
+	}
+	p, err := strconv.ParseUint(portStr, 10, 16)
+	if err != nil {
+		return 0, fmt.Errorf("endpoint must be host:port when port forwarding is enabled: invalid port %q in %q", portStr, endpoint)
+	}
+	return uint16(p), nil
 }
 
 var identQuoteReplacer = strings.NewReplacer("`", "``")

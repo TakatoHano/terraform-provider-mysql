@@ -1,3 +1,5 @@
 documentation:
-  - website/**
-  - README.md
+  - changed-files:
+      - any-glob-to-any-file:
+          - website/**
+          - README.md

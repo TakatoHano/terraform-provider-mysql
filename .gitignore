@@ -33,3 +33,6 @@ website/vendor
 
 # Private settinga
 .env
+
+# GoReleaser output
+dist/

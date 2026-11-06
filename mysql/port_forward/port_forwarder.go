@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path"
+	"sync"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
@@ -47,8 +48,7 @@ func ParsePFConfigMap(d *schema.ResourceData) (map[string]string, error) {
 		pfConf["db_endpoint"] = v
 	}
 
-	cu, _ := user.Current()
-	pfConf["ssh_user"] = cu.Username
+	pfConf["ssh_user"] = currentUsername()
 	if v, ok := confMap["ssh_user"].(string); ok && v != "" {
 		pfConf["ssh_user"] = v
 	}
@@ -80,8 +80,7 @@ func ParsePFConfig(confMap map[string]string, localPort uint16) (*portFowardConf
 	if v, ok := confMap["db_endpoint"]; ok && v != "" {
 		conf.dbEndpoint = v
 	}
-	cu, _ := user.Current()
-	conf.sshUser = cu.Username
+	conf.sshUser = currentUsername()
 	if v, ok := confMap["ssh_user"]; ok && v != "" {
 		conf.sshUser = v
 	}
@@ -140,6 +139,15 @@ func (pfConf *portFowardConfig) Connect() error {
 	}
 
 	return nil
+}
+
+// currentUsername returns the current OS user name, falling back to $USER.
+// It returns an empty string when neither is available.
+func currentUsername() string {
+	if cu, err := user.Current(); err == nil && cu != nil && cu.Username != "" {
+		return cu.Username
+	}
+	return os.Getenv("USER")
 }
 
 func defaultSSHKeyPath() string {
@@ -269,23 +277,16 @@ func (pfConf *portFowardConfig) CreateSSHClientWithProxyCommand(
 }
 
 func (pfConf *portFowardConfig) PortForward(sshClient *ssh.Client) error {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", pfConf.localPort))
+	// Bind to loopback only so the tunnel is not exposed to the LAN.
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", pfConf.localPort))
 	if err != nil {
 		return err
 	}
-
-	done := make(chan struct{})
 
 	go func() {
 		defer listener.Close()
 
 		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-
 			localConn, err := listener.Accept()
 			if err != nil {
 				var ne net.Error
@@ -299,18 +300,27 @@ func (pfConf *portFowardConfig) PortForward(sshClient *ssh.Client) error {
 			remoteConn, err := sshClient.Dial("tcp", pfConf.dbEndpoint)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "dial failed: ", err)
-				return
+				localConn.Close()
+				continue
+			}
+
+			var once sync.Once
+			closeBoth := func() {
+				once.Do(func() {
+					localConn.Close()
+					remoteConn.Close()
+				})
 			}
 
 			go func() {
-				defer localConn.Close()
-				defer remoteConn.Close()
+				defer closeBoth()
 				if _, err := io.Copy(remoteConn, localConn); err != nil {
 					fmt.Fprintln(os.Stderr, "copy failed: ", err)
 				}
 			}()
 
 			go func() {
+				defer closeBoth()
 				if _, err := io.Copy(localConn, remoteConn); err != nil {
 					fmt.Fprintln(os.Stderr, "copy failed: ", err)
 				}
