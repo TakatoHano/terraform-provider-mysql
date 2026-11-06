@@ -1,11 +1,12 @@
 package mysql
 
 import (
+	"context"
 	"os"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 // To run these acceptance tests, you will need access to a MySQL server.
@@ -26,24 +27,20 @@ import (
 // You can run the tests like this:
 //    make testacc TEST=./builtin/providers/mysql
 
-var testAccProviders map[string]terraform.ResourceProvider
+var testAccProviderFactories map[string]func() (*schema.Provider, error)
 var testAccProvider *schema.Provider
 
 func init() {
-	testAccProvider = Provider().(*schema.Provider)
-	testAccProviders = map[string]terraform.ResourceProvider{
-		"mysql": testAccProvider,
+	testAccProvider = Provider()
+	testAccProviderFactories = map[string]func() (*schema.Provider, error){
+		"mysql": func() (*schema.Provider, error) { return testAccProvider, nil },
 	}
 }
 
 func TestProvider(t *testing.T) {
-	if err := Provider().(*schema.Provider).InternalValidate(); err != nil {
+	if err := Provider().InternalValidate(); err != nil {
 		t.Fatalf("err: %s", err)
 	}
-}
-
-func TestProvider_impl(t *testing.T) {
-	var _ terraform.ResourceProvider = Provider()
 }
 
 func testAccPreCheck(t *testing.T) {
@@ -53,8 +50,8 @@ func testAccPreCheck(t *testing.T) {
 		}
 	}
 
-	err := testAccProvider.Configure(terraform.NewResourceConfigRaw(nil))
-	if err != nil {
-		t.Fatal(err)
+	diags := testAccProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(nil))
+	if diags.HasError() {
+		t.Fatal(diags)
 	}
 }

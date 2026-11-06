@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -9,17 +10,18 @@ import (
 	"errors"
 
 	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func resourceUser() *schema.Resource {
 	return &schema.Resource{
-		Create: CreateUser,
-		Update: UpdateUser,
-		Read:   ReadUser,
-		Delete: DeleteUser,
+		CreateContext: CreateUser,
+		UpdateContext: UpdateUser,
+		ReadContext:   ReadUser,
+		DeleteContext: DeleteUser,
 		Importer: &schema.ResourceImporter{
-			State: ImportUser,
+			StateContext: ImportUser,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -68,10 +70,10 @@ func resourceUser() *schema.Resource {
 	}
 }
 
-func CreateUser(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var authStm string
@@ -101,7 +103,7 @@ func CreateUser(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	if auth == "AWSAuthenticationPlugin" && d.Get("host").(string) == "localhost" {
-		return errors.New("cannot use IAM auth against localhost")
+		return diag.Errorf("cannot use IAM auth against localhost")
 	}
 
 	if authStm != "" {
@@ -113,7 +115,7 @@ func CreateUser(d *schema.ResourceData, meta interface{}) error {
 	requiredVersion, _ := version.NewVersion("5.7.0")
 	currentVersion, err := serverVersion(db)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	if currentVersion.GreaterThan(requiredVersion) && d.Get("tls_option").(string) != "" {
@@ -121,9 +123,9 @@ func CreateUser(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	log.Println("Executing statement:", stmtSQL)
-	_, err = db.Exec(stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	user := fmt.Sprintf("%s@%s", d.Get("user").(string), d.Get("host").(string))
@@ -132,10 +134,10 @@ func CreateUser(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func UpdateUser(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var auth string
@@ -163,7 +165,7 @@ func UpdateUser(d *schema.ResourceData, meta interface{}) error {
 		/* ALTER USER syntax introduced in MySQL 5.7.6 deprecates SET PASSWORD (GH-8230) */
 		serverVersion, err := serverVersion(db)
 		if err != nil {
-			return fmt.Errorf("could not determine server version: %s", err)
+			return diag.Errorf("could not determine server version: %s", err)
 		}
 
 		ver, _ := version.NewVersion("5.7.6")
@@ -180,16 +182,16 @@ func UpdateUser(d *schema.ResourceData, meta interface{}) error {
 		}
 
 		log.Println("Executing query:", stmtSQL)
-		_, err = db.Exec(stmtSQL)
+		_, err = db.ExecContext(ctx, stmtSQL)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 	}
 
 	requiredVersion, _ := version.NewVersion("5.7.0")
 	currentVersion, err := serverVersion(db)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	if d.HasChange("tls_option") && currentVersion.GreaterThan(requiredVersion) {
@@ -199,35 +201,35 @@ func UpdateUser(d *schema.ResourceData, meta interface{}) error {
 			fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string)))
 
 		log.Println("Executing query:", stmtSQL)
-		_, err := db.Exec(stmtSQL)
+		_, err := db.ExecContext(ctx, stmtSQL)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 	}
 
 	return nil
 }
 
-func ReadUser(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var exists int
-	err = db.QueryRow("SELECT 1 FROM mysql.user WHERE user = ? AND host = ?",
+	err = db.QueryRowContext(ctx, "SELECT 1 FROM mysql.user WHERE user = ? AND host = ?",
 		d.Get("user").(string), d.Get("host").(string)).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		d.SetId("")
 		return nil
 	}
-	return err
+	return diag.FromErr(err)
 }
 
-func DeleteUser(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func DeleteUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	stmtSQL := fmt.Sprintf("DROP USER '%s'@'%s'",
@@ -236,14 +238,14 @@ func DeleteUser(d *schema.ResourceData, meta interface{}) error {
 
 	log.Println("Executing statement:", stmtSQL)
 
-	_, err = db.Exec(stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err == nil {
 		d.SetId("")
 	}
-	return err
+	return diag.FromErr(err)
 }
 
-func ImportUser(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+func ImportUser(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	// terraform import mysql_user.user user@host
 	userHost := strings.SplitN(d.Id(), "@", 2)
 
@@ -254,14 +256,14 @@ func ImportUser(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceDat
 	user := userHost[0]
 	host := userHost[1]
 
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 
 	if err != nil {
 		return nil, err
 	}
 
 	var count int
-	err = db.QueryRow("SELECT COUNT(1) FROM mysql.user WHERE user = ? AND host = ?", user, host).Scan(&count)
+	err = db.QueryRowContext(ctx, "SELECT COUNT(1) FROM mysql.user WHERE user = ? AND host = ?", user, host).Scan(&count)
 
 	if err != nil {
 		return nil, err

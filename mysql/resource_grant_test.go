@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -9,16 +10,16 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccGrant(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfig_basic(dbName),
@@ -51,7 +52,7 @@ func TestAccGrant_role(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+			db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
 				return
 			}
@@ -66,8 +67,8 @@ func TestAccGrant_role(t *testing.T) {
 				t.Skip("Roles require MySQL 8+")
 			}
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfig_role(dbName, roleName),
@@ -85,7 +86,7 @@ func TestAccGrant_roleToUser(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+			db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
 				return
 			}
@@ -100,8 +101,8 @@ func TestAccGrant_roleToUser(t *testing.T) {
 				t.Skip("Roles require MySQL 8+")
 			}
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfig_roleToUser(dbName, roleName),
@@ -126,7 +127,7 @@ func testAccPrivilegeExists(rn string, privilege string) resource.TestCheckFunc 
 			return fmt.Errorf("grant id not set")
 		}
 
-		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+		db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
@@ -172,7 +173,7 @@ func testAccPrivilegeExists(rn string, privilege string) resource.TestCheckFunc 
 }
 
 func testAccGrantCheckDestroy(s *terraform.State) error {
-	db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+	db, err := connectToMySQL(context.Background(), testAccProvider.Meta().(*MySQLConfiguration))
 	if err != nil {
 		return err
 	}

@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/keybase/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 // testAccPGPPublicKey generates a throwaway PGP key and returns its base64
@@ -18,10 +17,6 @@ func testAccPGPPublicKey(t *testing.T) string {
 	entity, err := openpgp.NewEntity("tf-acc-test", "", "tf-acc-test@example.com", nil)
 	if err != nil {
 		t.Fatalf("generating PGP key: %s", err)
-	}
-	// SerializePrivate signs the identities, which Serialize requires.
-	if err := entity.SerializePrivate(io.Discard, nil); err != nil {
-		t.Fatalf("signing PGP key: %s", err)
 	}
 	var buf bytes.Buffer
 	if err := entity.Serialize(&buf); err != nil {
@@ -33,9 +28,9 @@ func testAccPGPPublicKey(t *testing.T) string {
 func TestAccUserPassword_basic(t *testing.T) {
 	pgpKey := testAccPGPPublicKey(t)
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserPasswordConfig_basic(pgpKey),

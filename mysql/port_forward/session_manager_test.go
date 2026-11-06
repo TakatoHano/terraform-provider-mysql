@@ -18,7 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 	"github.com/hashicorp/go-multierror"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // mockSSM implements only the SSM calls used by session_manager.go.

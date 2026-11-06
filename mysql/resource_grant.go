@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -9,19 +10,20 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 const nonexistingGrantErrCode = 1141
 
 func resourceGrant() *schema.Resource {
 	return &schema.Resource{
-		Create: CreateGrant,
-		Update: nil,
-		Read:   ReadGrant,
-		Delete: DeleteGrant,
+		CreateContext: CreateGrant,
+		UpdateContext: nil,
+		ReadContext:   ReadGrant,
+		DeleteContext: DeleteGrant,
 		Importer: &schema.ResourceImporter{
-			State: ImportGrant,
+			StateContext: ImportGrant,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -143,15 +145,15 @@ func supportsRoles(db *sql.DB) (bool, error) {
 	return hasRoles, nil
 }
 
-func CreateGrant(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	hasRoles, err := supportsRoles(db)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var (
@@ -166,13 +168,13 @@ func CreateGrant(d *schema.ResourceData, meta interface{}) error {
 		hasPrivs = true
 	} else if attr, ok := d.GetOk("roles"); ok {
 		if !hasRoles {
-			return fmt.Errorf("roles are only supported on MySQL 8 and above")
+			return diag.Errorf("roles are only supported on MySQL 8 and above")
 		}
 		listOfRoles := attr.(*schema.Set).List()
 		rolesGranted = len(listOfRoles)
 		privilegesOrRoles = flattenList(listOfRoles, "'%s'")
 	} else {
-		return fmt.Errorf("one of privileges or roles is required")
+		return diag.Errorf("one of privileges or roles is required")
 	}
 
 	user := d.Get("user").(string)
@@ -181,7 +183,7 @@ func CreateGrant(d *schema.ResourceData, meta interface{}) error {
 
 	userOrRole, isRole, err := userOrRole(user, host, role, hasRoles)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	database := formatDatabaseName(d.Get("database").(string))
@@ -207,9 +209,9 @@ func CreateGrant(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	log.Println("Executing statement:", stmtSQL)
-	_, err = db.Exec(stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
-		return fmt.Errorf("error running SQL (%s): %s", stmtSQL, err)
+		return diag.Errorf("error running SQL (%s): %s", stmtSQL, err)
 	}
 
 	id := fmt.Sprintf("%s@%s:%s", user, host, database)
@@ -219,18 +221,18 @@ func CreateGrant(d *schema.ResourceData, meta interface{}) error {
 
 	d.SetId(id)
 
-	return ReadGrant(d, meta)
+	return ReadGrant(ctx, d, meta)
 }
 
-func ReadGrant(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	hasRoles, err := supportsRoles(db)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	userOrRole, _, err := userOrRole(
@@ -239,14 +241,14 @@ func ReadGrant(d *schema.ResourceData, meta interface{}) error {
 		d.Get("role").(string),
 		hasRoles)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	sql := fmt.Sprintf("SHOW GRANTS FOR %s", userOrRole)
 
 	log.Println("[DEBUG] SQL:", sql)
 
-	_, err = db.Exec(sql)
+	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
 		log.Printf("[WARN] GRANT not found for %s - removing from state", userOrRole)
 		d.SetId("")
@@ -255,10 +257,10 @@ func ReadGrant(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func DeleteGrant(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	database := formatDatabaseName(d.Get("database").(string))
@@ -267,7 +269,7 @@ func DeleteGrant(d *schema.ResourceData, meta interface{}) error {
 
 	hasRoles, err := supportsRoles(db)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	userOrRole, isRole, err := userOrRole(
@@ -276,7 +278,7 @@ func DeleteGrant(d *schema.ResourceData, meta interface{}) error {
 		d.Get("role").(string),
 		hasRoles)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	roles := d.Get("roles").(*schema.Set)
@@ -290,11 +292,11 @@ func DeleteGrant(d *schema.ResourceData, meta interface{}) error {
 			userOrRole)
 
 		log.Printf("[DEBUG] SQL: %s", sql)
-		_, err = db.Exec(sql)
+		_, err = db.ExecContext(ctx, sql)
 		// MySQL 8.4 answers 1141 when the user does not hold GRANT OPTION
 		// (older versions silently succeed); there is nothing to revoke then.
 		if me, ok := err.(*mysql.MySQLError); err != nil && !(ok && me.Number == nonexistingGrantErrCode) {
-			return fmt.Errorf("error revoking GRANT (%s): %s", sql, err)
+			return diag.Errorf("error revoking GRANT (%s): %s", sql, err)
 		}
 	}
 
@@ -308,15 +310,15 @@ func DeleteGrant(d *schema.ResourceData, meta interface{}) error {
 
 	sql = fmt.Sprintf("REVOKE %s FROM %s", whatToRevoke, userOrRole)
 	log.Printf("[DEBUG] SQL: %s", sql)
-	_, err = db.Exec(sql)
+	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
-		return fmt.Errorf("error revoking ALL (%s): %s", sql, err)
+		return diag.Errorf("error revoking ALL (%s): %s", sql, err)
 	}
 
 	return nil
 }
 
-func ImportGrant(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	// terraform import mysql_grant.user user@host:database
 	id := d.Id()
 	userHostDB := strings.SplitN(id, "@", 2)
@@ -333,13 +335,13 @@ func ImportGrant(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceDa
 	host := hostDB[0]
 	database := hostDB[1]
 
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
 		return nil, err
 	}
 
 	sql := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", user, host)
-	rows, err := db.Query(sql)
+	rows, err := db.QueryContext(ctx, sql)
 
 	if err != nil {
 		return nil, err

@@ -16,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 	"github.com/hashicorp/go-multierror"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // newSSMClient builds the SSM API client used by connect. It is a variable so

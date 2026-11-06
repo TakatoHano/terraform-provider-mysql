@@ -1,17 +1,19 @@
 package mysql
 
 import (
+	"context"
 	"fmt"
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func resourceRole() *schema.Resource {
 	return &schema.Resource{
-		Create: CreateRole,
-		Read:   ReadRole,
-		Delete: DeleteRole,
+		CreateContext: CreateRole,
+		ReadContext:   ReadRole,
+		DeleteContext: DeleteRole,
 
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -23,10 +25,10 @@ func resourceRole() *schema.Resource {
 	}
 }
 
-func CreateRole(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	roleName := d.Get("name").(string)
@@ -34,9 +36,9 @@ func CreateRole(d *schema.ResourceData, meta interface{}) error {
 	sql := fmt.Sprintf("CREATE ROLE '%s'", roleName)
 	log.Printf("[DEBUG] SQL: %s", sql)
 
-	_, err = db.Exec(sql)
+	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
-		return fmt.Errorf("error creating role: %s", err)
+		return diag.Errorf("error creating role: %s", err)
 	}
 
 	d.SetId(roleName)
@@ -44,16 +46,16 @@ func CreateRole(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func ReadRole(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	sql := fmt.Sprintf("SHOW GRANTS FOR '%s'", d.Id())
 	log.Printf("[DEBUG] SQL: %s", sql)
 
-	_, err = db.Exec(sql)
+	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
 		log.Printf("[WARN] Role (%s) not found; removing from state", d.Id())
 		d.SetId("")
@@ -65,18 +67,18 @@ func ReadRole(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func DeleteRole(d *schema.ResourceData, meta interface{}) error {
-	db, err := connectToMySQL(meta.(*MySQLConfiguration))
+func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	db, err := connectToMySQL(ctx, meta.(*MySQLConfiguration))
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	sql := fmt.Sprintf("DROP ROLE '%s'", d.Get("name").(string))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
-	_, err = db.Exec(sql)
+	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
