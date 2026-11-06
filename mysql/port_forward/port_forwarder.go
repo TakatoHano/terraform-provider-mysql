@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path"
+	"strings"
 	"sync"
 
 	"github.com/hashicorp/go-multierror"
@@ -39,8 +40,7 @@ func ParsePFConfigMap(d *schema.ResourceData) (map[string]string, error) {
 	pfConf := map[string]string{}
 
 	if v, ok := confMap["remote_host"].(string); ok && v != "" {
-		addr := fmt.Sprintf("%s:22", v)
-		pfConf["remote_endpoint"] = addr
+		pfConf["remote_endpoint"] = withDefaultSSHPort(v)
 	}
 
 	if v, ok := confMap["db_endpoint"].(string); ok && v != "" {
@@ -59,6 +59,16 @@ func ParsePFConfigMap(d *schema.ResourceData) (map[string]string, error) {
 
 	return pfConf, nil
 
+}
+
+// withDefaultSSHPort appends ":22" to host unless it already carries a port.
+func withDefaultSSHPort(host string) string {
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+	// A bare IPv6 literal may be written with or without brackets.
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	return net.JoinHostPort(host, "22")
 }
 
 func ParsePFConfig(confMap map[string]string, localPort uint16) (*portFowardConfig, error) {
@@ -200,6 +210,17 @@ func createHostKeyCallback() (ssh.HostKeyCallback, error) {
 	}
 
 	knownHosts := path.Join(home, ".ssh", "known_hosts")
+
+	// Create ~/.ssh and known_hosts on first use so a fresh machine does not
+	// fail in knownhosts.New.
+	if err := os.MkdirAll(path.Dir(knownHosts), 0o700); err != nil {
+		return nil, err
+	}
+	if f, err := os.OpenFile(knownHosts, os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
+		return nil, err
+	} else if err := f.Close(); err != nil {
+		return nil, err
+	}
 
 	cb, err := knownhosts.New(knownHosts)
 	if err != nil {

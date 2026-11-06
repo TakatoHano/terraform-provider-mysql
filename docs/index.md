@@ -142,6 +142,10 @@ See [Setting up Session Manager](https://docs.aws.amazon.com/systems-manager/lat
 
 ~> **Note:** The SSH tunnel, the `session-manager-plugin` process and the SSM session are closed when the provider exits. An `aws_profile` that does not exist in the shared AWS config is an error.
 
+`remote_host` may be given as `host` (port 22 is assumed) or `host:port`. Host
+keys are verified against `~/.ssh/known_hosts`; the file (and `~/.ssh`) is
+created when missing and unknown hosts are added on first use.
+
 ~> **Note:** The local port forward listener binds to `127.0.0.1` only, so it is not reachable from other hosts.
 
 ## Port forward through public bastion
@@ -245,7 +249,7 @@ Optional:
 Required:
 
 - `db_endpoint` (String) The endpoint of the DB server to use.
-- `remote_host` (String) The IP or host of public bastion server can connect the DB server to use.
+- `remote_host` (String) The IP or host of public bastion server can connect the DB server to use. May include a port as `host:port`; defaults to port 22.
 
 Optional:
 

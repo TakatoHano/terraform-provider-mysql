@@ -98,3 +98,85 @@ jobs:
           MYSQL_USERNAME: root
           MYSQL_PASSWORD: root
         run: go test ./mysql -run 'TestAcc' -v -timeout 20m
+
+  # End-to-end test of port_forward_client_config against a real sshd and MySQL.
+  tunnel:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - "3306:3306"
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "v1.17.1"
+          terraform_wrapper: false
+      - name: Generate SSH key
+        run: |
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_tunnel"
+      - name: Start sshd
+        run: |
+          docker run -d --name sshd \
+            --network ${{ job.services.mysql.network }} \
+            -p 2222:2222 \
+            -e PUID=1000 -e PGID=1000 \
+            -e USER_NAME=tunnel \
+            -e PUBLIC_KEY="$(cat "$HOME/.ssh/id_tunnel.pub")" \
+            -e SUDO_ACCESS=false \
+            lscr.io/linuxserver/openssh-server:latest
+      # The image ships with "AllowTcpForwarding no"; the tunnel needs it.
+      - name: Enable TCP forwarding in sshd
+        run: |
+          for _ in $(seq 1 30); do
+            docker exec sshd test -f /config/sshd/sshd_config && break
+            sleep 1
+          done
+          docker exec sshd sed -i 's/^AllowTcpForwarding.*/AllowTcpForwarding yes/' /config/sshd/sshd_config
+          docker exec sshd grep -n '^AllowTcpForwarding' /config/sshd/sshd_config
+          docker restart sshd
+      - name: Wait for sshd
+        run: |
+          for _ in $(seq 1 30); do
+            if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
+                -i "$HOME/.ssh/id_tunnel" -p 2222 tunnel@127.0.0.1 true; then
+              echo "sshd is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sshd
+          echo "sshd did not become ready" >&2
+          exit 1
+      - name: Check MySQL is reachable from sshd
+        run: docker exec sshd nc -z -w 5 mysql 3306
+      - name: Tunnel acceptance tests
+        env:
+          TF_ACC: "1"
+          MYSQL_PF_SSH_HOST: 127.0.0.1:2222
+          MYSQL_PF_SSH_USER: tunnel
+          MYSQL_PF_DB_ENDPOINT: mysql:3306
+          MYSQL_USERNAME: root
+          MYSQL_PASSWORD: root
+        run: |
+          MYSQL_PF_SSH_KEY_PATH="$HOME/.ssh/id_tunnel" \
+          go test ./mysql -run TestAccPortForward -v -timeout 10m
+      - name: sshd logs
+        if: failure()
+        run: docker logs sshd

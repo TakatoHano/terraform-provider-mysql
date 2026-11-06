@@ -236,9 +236,15 @@ func sessionManagerPlugin(
 		profile = getAWSProfile()
 	}
 
-	cmd := exec.Command(command, string(encodedOut), region, "StartSession", profile, string(encodedIn), endpoint)
+	cmd := newPluginCmd(command, []string{string(encodedOut), region, "StartSession", profile, string(encodedIn), endpoint})
 
 	return cmd, nil
+}
+
+// newPluginCmd builds the session-manager-plugin command. It is a variable so
+// that tests can substitute a fake plugin.
+var newPluginCmd = func(command string, args []string) *exec.Cmd {
+	return exec.Command(command, args...)
 }
 
 func getAWSProfile() string {
