@@ -1,4 +1,4 @@
-# terraform-mysql-provider (unofficeal)
+# terraform-mysql-provider (unofficial)
 ==================
 
 Forked from https://github.com/hashicorp/terraform-provider-mysql
