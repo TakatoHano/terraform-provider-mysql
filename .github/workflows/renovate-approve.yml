@@ -1,0 +1,32 @@
+name: Renovate auto-approve
+
+# Why this is safe here:
+# - Renovate PRs only change dependency versions (go.mod/go.sum, workflow pins).
+# - The approval only satisfies the "1 approving review" rule; the merge itself
+#   (GitHub auto-merge) still waits for the full CI, including the MySQL 8.0/8.4
+#   acceptance tests.
+# - Renovate only automerges minor/patch/digest/pin updates (see renovate.json);
+#   major updates and Go toolchain bumps are not automerged and still need a
+#   human decision.
+# - synchronize is included because dismiss_stale_reviews drops the approval on
+#   every Renovate rebase/force-push.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  approve:
+    if: github.event.pull_request.user.login == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve Renovate PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh pr review "${{ github.event.pull_request.number }}" --approve --body "Auto-approved: Renovate update; merge is gated on CI."

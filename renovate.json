@@ -1,6 +1,36 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Minor, patch, digest and pin updates are automerged via GitHub auto-merge once CI (build, vet, staticcheck, unit and MySQL 8.0/8.4 acceptance tests) and the review requirement pass.",
+    "Major updates and Go toolchain bumps always stay manual."
+  ],
   "extends": [
     "config:recommended"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "prConcurrentLimit": 5,
+  "rebaseWhen": "behind-base-branch",
+  "packageRules": [
+    {
+      "description": "Automerge low-risk updates; majors are intentionally not matched.",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge GitHub Actions minor/patch updates; majors stay manual.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Go toolchain bumps change the supported/built Go version; review manually.",
+      "matchDatasources": ["golang-version"],
+      "matchDepNames": ["go"],
+      "automerge": false
+    }
   ]
 }
