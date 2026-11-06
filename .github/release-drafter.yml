@@ -6,13 +6,13 @@ categories:
   - title: "FEATURES:"
     label: enhancement
   - title: "IMPROVEMENTS:"
-    label:
+    labels:
       - 'improvement'
       - 'change'
   - title: "BUG FIXES:"
     label: bug
   - title: "OTHER:"
-    label:
+    labels:
       - 'chore'
       - 'refactor'
       - 'documentation'
