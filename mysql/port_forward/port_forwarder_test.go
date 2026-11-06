@@ -333,9 +333,11 @@ func TestPortForwardEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { client.Close() })
 
-	if err := pfConf.PortForward(client); err != nil {
+	listener, err := pfConf.PortForward(client)
+	if err != nil {
 		t.Fatal(err)
 	}
+	tun := &Tunnel{listener: listener, client: client}
 	local := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
 
 	echoRoundTrip(t, local, "hello")
@@ -362,4 +364,23 @@ func TestPortForwardEndToEnd(t *testing.T) {
 		t.Fatalf("listener stopped accepting after dial failure: %v", err)
 	}
 	c4.Close()
+
+	// Closing the tunnel stops the listener and the ssh client.
+	if err := tun.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if c, err := net.DialTimeout("tcp", local, 2*time.Second); err == nil {
+		c.Close()
+		t.Error("local port still accepts connections after Close")
+	}
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- client.Wait() }()
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Error("ssh client not closed after Tunnel.Close")
+	}
+	if _, _, err := client.SendRequest("keepalive@test", true, nil); err == nil {
+		t.Error("ssh client still usable after Close")
+	}
 }

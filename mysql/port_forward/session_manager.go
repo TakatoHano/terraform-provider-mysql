@@ -88,9 +88,11 @@ func ParseSessionConfig(d *schema.ResourceData) (*sessionConfig, map[string]stri
 
 }
 
-func Connect(sessConf *sessionConfig, pfConf *portFowardConfig) error {
+// Connect opens the configured tunnel. It returns (nil, nil) when no port
+// forwarding is configured. The caller owns the returned Tunnel and must Close it.
+func Connect(sessConf *sessionConfig, pfConf *portFowardConfig) (*Tunnel, error) {
 	if pfConf == nil {
-		return nil
+		return nil, nil
 	}
 	if sessConf == nil {
 		return pfConf.Connect()
@@ -115,52 +117,36 @@ func (conf *sessionConfig) validate() error {
 	return nil
 }
 
-func (conf *sessionConfig) connect(pfConf *portFowardConfig) error {
+func (conf *sessionConfig) connect(pfConf *portFowardConfig) (*Tunnel, error) {
 	// Region and endpoint are resolved once from the session (the same values
 	// ssm.New(conf.session) would use) so openSession only needs the interface.
 	region := aws.StringValue(conf.session.Config.Region)
 	endpoint := conf.session.ClientConfig(ssm.ServiceName).Endpoint
 	proxyCmd, closeSession, err := openSession(newSSMClient(conf.session), conf.instanceID, conf.profile, region, endpoint)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	t := &Tunnel{closeSession: closeSession}
 
 	sshConfig, err := pfConf.CreateSSHClientConfig()
 	if err != nil {
-		errors := err
-
-		if err := closeSession(); err != nil {
-			errors = multierror.Append(errors, err)
-		}
-		return errors
+		return nil, closeAfter(err, t)
 	}
 
 	sshClient, killProxyCmd, err := pfConf.CreateSSHClientWithProxyCommand(proxyCmd, sshConfig)
 	if err != nil {
-		errors := err
-
-		if err := closeSession(); err != nil {
-			errors = multierror.Append(errors, err)
-		}
-		return errors
+		return nil, closeAfter(err, t)
 	}
+	t.client = sshClient
+	t.killProxy = killProxyCmd
 
-	if err := pfConf.PortForward(sshClient); err != nil {
-		errors := err
-
-		if err := sshClient.Close(); err != nil {
-			errors = multierror.Append(errors, err)
-		}
-		if err := killProxyCmd(); err != nil {
-			errors = multierror.Append(errors, err)
-		}
-		if err := closeSession(); err != nil {
-			errors = multierror.Append(errors, err)
-		}
-		return errors
+	listener, err := pfConf.PortForward(sshClient)
+	if err != nil {
+		return nil, closeAfter(err, t)
 	}
+	t.listener = listener
 
-	return nil
+	return t, nil
 }
 
 func openSession(svc ssmiface.SSMAPI, instanceID, profile, region, endpoint string) (*exec.Cmd, func() error, error) {

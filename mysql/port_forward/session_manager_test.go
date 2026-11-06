@@ -365,10 +365,28 @@ func TestConnectTerminatesSessionOnError(t *testing.T) {
 		keyPath: filepath.Join(t.TempDir(), "does-not-exist"),
 	}
 
-	if err := conf.connect(pf); err == nil {
-		t.Fatal("want error for missing key file")
+	if tun, err := conf.connect(pf); err == nil || tun != nil {
+		t.Fatal("want error and nil tunnel for missing key file")
 	}
 	if got := m.terminateCalls(); len(got) != 1 || got[0] != "sess-123" {
 		t.Errorf("terminate calls = %v, want exactly one for sess-123", got)
+	}
+}
+
+func TestTunnelCloseTerminatesSessionOnce(t *testing.T) {
+	m := &mockSSM{}
+	_, closeFn, err := openSession(m, "i-0123", "p", "us-east-1", "https://ssm.us-east-1.amazonaws.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tun := &Tunnel{closeSession: closeFn}
+	if err := tun.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tun.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.terminateCalls(); len(got) != 1 || got[0] != "sess-123" {
+		t.Errorf("terminate calls = %v, want exactly one", got)
 	}
 }
