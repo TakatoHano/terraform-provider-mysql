@@ -5,7 +5,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.21
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.3
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.83.0
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.84.0
 	github.com/go-sql-driver/mysql v1.10.2
 	github.com/gofrs/uuid/v5 v5.5.1
 	github.com/hashicorp/go-multierror v1.1.1
